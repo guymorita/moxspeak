@@ -3,3 +3,7 @@ build/
 .build/
 DerivedData/
 *.xcuserstate
+*.o
+*.d
+*.swiftdeps
+.superpowers/
