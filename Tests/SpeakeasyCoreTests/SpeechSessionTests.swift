@@ -62,9 +62,75 @@ private let article = String(
 
     _ = await session.speak(article, voice: "v", speed: 1.0)
     try await Task.sleep(for: .milliseconds(50))
-    await session.cancelAll()
+    await session.cancelAllAndWait()
 
     #expect(await fake.cancelledCount >= 1)
+}
+
+@Test func staleWorkIsDiscardedEvenWhenItIgnoresCancellation() async throws {
+    // A provider that does NOT honor cancellation: it always returns audio anyway.
+    // With this, the generation guard is the only thing preventing a stale commit.
+    //
+    // Crucially, the FIRST call is made to resolve SLOWER than the second: if the
+    // stale (first-generation) call finished before the second (current-generation)
+    // call, the second call's write would land last regardless of any guard, and the
+    // test would pass for the wrong reason even with the guards deleted. Making the
+    // first call the slower one means the stale write, if not blocked by the guard,
+    // arrives last and corrupts already-committed current-generation state.
+    actor UncancellableProvider: SpeechProvider {
+        nonisolated var outputFormat: AudioFormat { .kokoroPCM }
+        nonisolated var supportsIncrementalStreaming: Bool { true }
+        nonisolated var recommendedCharacterCap: Int { 150 }
+        private let estimator = DurationEstimator()
+        private var callCount = 0
+        func synthesize(text: String, voice: String, speed: Double) async throws -> Data {
+            callCount += 1
+            let isFirstCall = callCount == 1
+            // A real delay that is NOT a Task cancellation point: `Task.sleep` throws
+            // (and thus returns early) the moment its task is cancelled, even under
+            // `try?` — `try?` only swallows the thrown error, it does not stop the
+            // sleep from waking up early. A checked continuation resumed by a plain
+            // `DispatchQueue.asyncAfter` has no idea the task was ever cancelled, so
+            // it waits out the full delay regardless. That's what "ignores
+            // cancellation" needs to mean here.
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(isFirstCall ? 300 : 20)) {
+                    continuation.resume()
+                }
+            }
+            let seconds = estimator.estimate(characterCount: text.count)
+            return Data(count: Int(seconds * Double(outputFormat.bytesPerSecond)))
+        }
+        func listVoices() async throws -> [Voice] { [] }
+    }
+
+    let estimator = DurationEstimator()
+    let session = SpeechSession(provider: UncancellableProvider(),
+                                preparer: TextPreparer(),
+                                segmenter: Segmenter(),
+                                estimator: estimator)
+
+    _ = await session.speak("First selection that will be replaced.", voice: "v", speed: 1.0)
+    try await Task.sleep(for: .milliseconds(20))   // let the first (slow) chunk get in flight
+
+    let newGeneration = await session.speak("Second selection.", voice: "v", speed: 1.0)
+
+    // Give both the fast current-generation call and the slow, abandoned
+    // first-generation call more than enough time to finish and try to commit.
+    // The stale one arrives last; its result must still be thrown away.
+    try await Task.sleep(for: .milliseconds(400))
+
+    #expect(await session.currentGeneration == newGeneration)
+    let chunks = await session.chunks
+    #expect(chunks.count == 1)
+    #expect(chunks[0].text == "Second selection.")
+
+    guard case .rendered(_, let duration) = await session.state(of: chunks[0].id) else {
+        Issue.record("expected chunk 0 to be rendered")
+        return
+    }
+    let expected = estimator.estimate(characterCount: chunks[0].text.count)
+    #expect(abs(duration - expected) < 0.05)
 }
 
 @Test func emptyInputProducesNoChunks() async {

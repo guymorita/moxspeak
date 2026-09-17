@@ -46,8 +46,8 @@ public actor SpeechSession {
 
     /// Replaces whatever is playing. Returns the new generation.
     @discardableResult
-    public func speak(_ raw: String, voice: String, speed: Double) async -> Int {
-        await cancelAll()
+    public func speak(_ raw: String, voice: String, speed: Double) -> Int {
+        cancelAll()
 
         currentGeneration += 1
         let generation = currentGeneration
@@ -61,13 +61,25 @@ public actor SpeechSession {
         return generation
     }
 
-    /// Cancels every in-flight render task and waits for each to actually stop before
-    /// returning. Marking a task cancelled only flips a flag; the task's own suspension
-    /// point (inside the provider, possibly on another actor) needs a scheduler tick to
-    /// observe it and unwind. Returning before that happens would let a caller believe
-    /// cancellation is complete when it is still in flight — races against a following
-    /// `speak` are exactly what generations exist to prevent.
-    public func cancelAll() async {
+    /// Cancels every in-flight render task and returns immediately — fire-and-forget.
+    /// This does NOT wait for the cancelled work to actually unwind. That's deliberate:
+    /// `speak` calls this on the hot path, and correctness does not depend on waiting.
+    /// `currentGeneration` is incremented synchronously right after this returns, with
+    /// no `await` in between, so any stale task that resumes later already sees the
+    /// advanced generation and is discarded by the guards in `render`. Making this
+    /// `async` and awaiting completion would couple hotkey latency to however long a
+    /// given provider takes to unwind a cancelled call, for a guarantee correctness
+    /// doesn't need. Use `cancelAllAndWait()` when you actually need cancellation to
+    /// have finished before proceeding (e.g. shutdown).
+    public func cancelAll() {
+        for task in renderTasks { task.cancel() }
+        renderTasks = []
+    }
+
+    /// Like `cancelAll()`, but waits for every cancelled task to actually finish before
+    /// returning. Use this for shutdown, or anywhere the caller needs cancellation's
+    /// effects to be fully settled — not on the `speak` hot path.
+    public func cancelAllAndWait() async {
         let tasks = renderTasks
         renderTasks = []
         for task in tasks { task.cancel() }
