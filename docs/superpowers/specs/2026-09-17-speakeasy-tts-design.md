@@ -436,7 +436,7 @@ clock, covering:
 
 ## Known issues
 
-### Backend silently loses audio above ~150-300 characters
+### Backend silently loses audio when a chunk exceeds ~13s of speech
 
 **Must be fixed. Does not block v1** — and measurement now shows the Segmenter's
 character cap does not merely avoid the bug, it fully mitigates it.
@@ -497,12 +497,53 @@ Ruled out by investigation:
 Localized to the synthesis loop at `api/src/services/tts_service.py:340` that consumes
 `smart_split`.
 
-**One contradicting data point, unexplained.** A parallel session sent a 21,800-character
+**ROOT CAUSE (found 2026-09-17, jointly with a parallel debugging session).**
+
+PyTorch's MPS backend on Apple Silicon has a hard limit of 65,536 output channels.
+Kokoro's vocoder produces a tensor whose channel dimension scales with the duration of
+audio being generated, so a single `generate()` call that would produce more than
+roughly 13-19 seconds of speech crosses that limit and MPS refuses to run it:
+
+```
+Generation failed: Output channels > 65536 not supported at the MPS device.
+```
+
+`PYTORCH_ENABLE_MPS_FALLBACK=1` does not catch it. The fallback only covers missing
+operations; this is a hard validation error, so there is nothing to fall back to. The
+same limit is documented against OpenVoice, RVC and Parler-TTS on Mac
+(pytorch/pytorch#144445).
+
+The failure is invisible because `tts_service.py` has two layers of broad
+`except Exception: log and continue` — one inside `_process_chunk()` (~line 172) and one
+in `generate_audio_stream()`'s per-chunk loop (~line 340). A chunk that hits the MPS
+error has its audio dropped and the loop moves on. The response still ends cleanly with
+200, which is indistinguishable from success to any client.
+
+At ~15.4 characters per second of speech, the 13-19 second ceiling corresponds to the
+200-300 character boundary measured above. Everything follows from this: proportional
+loss (only chunks under the ceiling survive), zero-byte responses, a healthy `/health`,
+and independence from format, request rate, and text content.
+
+The earlier hypothesis that repetitive text triggered it was tested and disproved —
+varied prose fails identically at matched lengths. So was a hypothesis that the trigger
+was the number of internal chunks; punctuation density makes no difference.
+
+**Why the 150-character cap is the right mitigation.** 150 characters is about 10 seconds
+of speech, roughly 30% under the ceiling. Every request the client makes is a single
+chunk well inside the working range, which is why chunked delivery renders complete audio
+where a single large request loses most of it.
+
+Fixes belong upstream and are being handled in the parallel session: abort the stream
+rather than ending it cleanly on chunk failure (a clean end cannot be detected by any
+client), retry the affected chunk on CPU with a narrowly-matched exception, and cap
+`smart_split` chunks by predicted audio duration rather than token count alone.
+
+
+**The one contradicting data point, now explained.** A parallel session sent a 21,800-character
 block shaped like the built-in web player's request and got back an essentially complete
-22-minute render. That run cannot be reproduced from this client with a minimal request
-body. The difference is therefore either request shape (a field the web player sets that
-a minimal body does not) or server state drift between the two runs. Resolving it is the
-next step whenever this bug is picked up.
+22-minute render. Under the root cause above, that run simply happened to be
+split into internal chunks that all stayed under the duration ceiling. It is consistent
+with the diagnosis rather than contradicting it.
 
 This is the reason `SpeechSession` validates returned audio duration per chunk. Even once
 fixed, that validation stays — it is the only thing standing between a silent backend
