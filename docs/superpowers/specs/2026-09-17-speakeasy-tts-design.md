@@ -528,6 +528,14 @@ The earlier hypothesis that repetitive text triggered it was tested and disprove
 varied prose fails identically at matched lengths. So was a hypothesis that the trigger
 was the number of internal chunks; punctuation density makes no difference.
 
+**The cap reduces incidence; it cannot guarantee safety.** The parallel session found
+chunks of ~245 tokens that succeeded in one run and failed in another — identical size,
+different outcome. So there is a state-dependent component on top of the size-dependent
+one, and no chunk-size cap can be a guarantee, because the thing being predicted is the
+same duration predictor that overflows. This is what makes per-chunk duration validation
+in `SpeechSession` load-bearing rather than belt-and-braces: it is the only mechanism
+that catches a failure the cap did not prevent.
+
 **Why the 150-character cap is the right mitigation.** 150 characters is about 10 seconds
 of speech, roughly 30% under the ceiling. Every request the client makes is a single
 chunk well inside the working range, which is why chunked delivery renders complete audio
