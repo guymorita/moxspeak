@@ -59,7 +59,7 @@ An earlier draft of this spec claimed 200–350ms to first sound. That number wa
 estimate presented as a measurement and it was wrong; it came from a cached response.
 The figures above replace it.
 
-**Inputs above roughly 180 characters are not reliable on the current backend.** See
+**Inputs above roughly 150-300 characters are not reliable on the current backend.** See
 Known Issues. The chunk cap in the Segmenter is sized to stay inside the working regime.
 
 ## Architecture
@@ -436,48 +436,77 @@ clock, covering:
 
 ## Known issues
 
-### Backend silently loses audio above ~180 characters
+### Backend silently loses audio above ~150-300 characters
 
-**Must be fixed. Does not block v1**, because the Segmenter's character cap keeps inputs
-inside the reliable regime.
+**Must be fixed. Does not block v1** — and measurement now shows the Segmenter's
+character cap does not merely avoid the bug, it fully mitigates it.
 
-The Kokoro-FastAPI at `localhost:8880` returns HTTP 200 with correct headers and
-truncated or entirely absent audio for inputs beyond roughly 180 characters. Measured
-sweep, unique text per trial:
+The Kokoro-FastAPI at `localhost:8880` returns HTTP 200 with correct headers
+(`audio/pcm`, `transfer-encoding: chunked`) and truncated or entirely absent audio.
+`/health` reports healthy throughout, including on requests that return zero bytes.
 
-| input chars | audio returned | expected |
-|---|---|---|
-| 120 | 7.8s | 7.8s ✓ |
-| 180 | 11.6s | 11.7s ✓ |
-| 200 | 0.0s | 13.0s ✗ |
-| 420 | 0.9s | 27.3s ✗ |
-| 500 | 4.8s | 32.5s ✗ |
-| 650 | 0.0s | 42.2s ✗ |
+**The loss is proportional and deterministic.** The same prose passage repeated:
 
-Results are **non-deterministic**, which points at a race rather than a size limit.
+| input | chars | expected | got | ratio |
+|---|---|---|---|---|
+| prose x1 | 801 | 52.0s | 11.16s | 21% |
+| prose x2 | 1602 | 104.0s | 22.32s | 21% |
+| prose x4 | 3204 | 208.1s | 44.63s | 21% |
+
+Exactly 1x / 2x / 4x. Roughly one chunk's worth of audio survives per ~800 characters
+of input. An earlier revision of this spec called the behavior non-deterministic; that
+was an artifact of a sweep that varied input length and request-sequence position
+together. It is deterministic.
+
+The practical threshold sits between 150 and 300 characters: 150 characters returns
+complete audio, 300 returns zero bytes.
+
+**Chunking is a complete mitigation, not just an avoidance.** A 580-character passage
+sent whole loses ~79% of its audio. Split into four chunks of at most 150 characters and
+sent back-to-back with no delay:
+
+```
+chunk 1: 147ch  expect  9.5s  got 9.34s  OK
+chunk 2: 145ch  expect  9.4s  got 8.68s  OK
+chunk 3: 144ch  expect  9.4s  got 9.56s  OK
+chunk 4: 149ch  expect  9.7s  got 9.52s  OK
+4/4 OK — 37.1s of audio rendered in 5.3s wall clock = 7.1x realtime
+```
+
+Nothing is lost, and throughput still outruns playback by 7x. This is why the cap is a
+correctness mechanism and not a performance tuning knob, and why no chunk may ever
+exceed it — including a single whitespace-free token, which is hard-split to stay under.
 
 Ruled out by investigation:
 
-- Device misconfiguration — correctly on MPS with `PYTORCH_ENABLE_MPS_FALLBACK=1`.
-- The text chunker — `smart_split` run directly produces correct chunks with full
-  character coverage.
-- Output format — pcm, mp3, and wav all fail identically.
-- Streaming vs non-streaming — both fail.
-- Normalization — fails with it disabled.
-- Model auto-unload — `model_auto_unload_timeout_seconds` defaults to 0.0 and is unset
-  in the environment.
+- **Output format** — pcm, mp3 and wav fail identically on byte-identical input (mp3
+  duration measured with ffprobe, not inferred from byte count).
+- **Request rate and concurrency** — eight back-to-back identical 300-character requests
+  all returned zero; a 3-second gap between them changed nothing.
+- **Version** — v0.9.0 and master are functionally identical here (confirmed
+  independently in a parallel session).
+- **Device misconfiguration** — `DEVICE_TYPE=mps`, `PYTORCH_ENABLE_MPS_FALLBACK=1`,
+  `USE_GPU=true` are all set on the running process.
+- **The text chunker** — `smart_split` run directly yields correct chunks with full
+  character coverage (458 of 459 characters on a two-chunk passage).
+- **Streaming vs non-streaming** — both fail.
+- **Normalization** — fails with it disabled.
+- **Model auto-unload** — `model_auto_unload_timeout_seconds` defaults to 0.0 and is
+  unset in the environment.
 
 Localized to the synthesis loop at `api/src/services/tts_service.py:340` that consumes
-`smart_split`. Chunks after the first are frequently dropped, sometimes the first too.
+`smart_split`.
 
-**Most likely cause is the local build, not upstream.** The checkout is on `master` at
-`b4ef64b`, past the `v0.9.0` tag rather than on a release. First things to try when
-returning to this: pin to the `v0.9.0` tag, rebuild the virtual environment from
-scratch, and re-run the sweep. A test against the release build is underway separately.
+**One contradicting data point, unexplained.** A parallel session sent a 21,800-character
+block shaped like the built-in web player's request and got back an essentially complete
+22-minute render. That run cannot be reproduced from this client with a minimal request
+body. The difference is therefore either request shape (a field the web player sets that
+a minimal body does not) or server state drift between the two runs. Resolving it is the
+next step whenever this bug is picked up.
 
-This is the reason `SpeechSession` validates returned audio duration per chunk. Even
-once fixed, that validation stays — it is the only thing standing between a silent
-backend failure and a user watching a progress bar advance over silence.
+This is the reason `SpeechSession` validates returned audio duration per chunk. Even once
+fixed, that validation stays — it is the only thing standing between a silent backend
+failure and a user watching a progress bar advance over silence.
 
 ## Future hooks
 
