@@ -38,84 +38,94 @@ private func ok(_ data: Data, url: URL) -> (HTTPURLResponse, Data) {
 }
 
 // MARK: - Tests
+//
+// These six tests share one process-wide `StubURLProtocol.handler`. Swift Testing runs
+// @Test functions concurrently by default, which races on that shared static and produces
+// cross-test contamination (test A's request served by test B's handler). `.serialized`
+// forces this suite's tests to run one at a time so the shared stub is safe under the
+// default `swift test` invocation, with no flags required at the call site.
 
-@Test func sendsCorrectRequestBody() async throws {
-    let url = URL(string: "http://localhost:8880")!
-    nonisolated(unsafe) var captured: Data?
-    StubURLProtocol.handler = { request in
-        captured = request.httpBodyStreamData() ?? request.httpBody
-        return ok(Data(count: 48000), url: request.url!)
+@Suite(.serialized)
+struct OpenAICompatibleProviderTests {
+
+    @Test func sendsCorrectRequestBody() async throws {
+        let url = URL(string: "http://localhost:8880")!
+        nonisolated(unsafe) var captured: Data?
+        StubURLProtocol.handler = { request in
+            captured = request.httpBodyStreamData() ?? request.httpBody
+            return ok(Data(count: 48000), url: request.url!)
+        }
+        let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
+                                                session: stubbedSession())
+        _ = try await provider.synthesize(text: "hello", voice: "af_bella", speed: 1.0)
+
+        let json = try JSONSerialization.jsonObject(with: #require(captured)) as! [String: Any]
+        #expect(json["input"] as? String == "hello")
+        #expect(json["voice"] as? String == "af_bella")
+        #expect(json["response_format"] as? String == "pcm")
+        #expect(json["stream"] as? Bool == true)
+        // unit_normalization defaults to false upstream and must be turned on.
+        let norm = json["normalization_options"] as! [String: Any]
+        #expect(norm["unit_normalization"] as? Bool == true)
     }
-    let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
-                                            session: stubbedSession())
-    _ = try await provider.synthesize(text: "hello", voice: "af_bella", speed: 1.0)
 
-    let json = try JSONSerialization.jsonObject(with: #require(captured)) as! [String: Any]
-    #expect(json["input"] as? String == "hello")
-    #expect(json["voice"] as? String == "af_bella")
-    #expect(json["response_format"] as? String == "pcm")
-    #expect(json["stream"] as? Bool == true)
-    // unit_normalization defaults to false upstream and must be turned on.
-    let norm = json["normalization_options"] as! [String: Any]
-    #expect(norm["unit_normalization"] as? Bool == true)
-}
-
-@Test func returnsAudioBytes() async throws {
-    StubURLProtocol.handler = { request in ok(Data(count: 96000), url: request.url!) }
-    let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
-                                            session: stubbedSession())
-    let data = try await provider.synthesize(text: "hello", voice: "v", speed: 1.0)
-    #expect(data.count == 96000)
-}
-
-@Test func mapsNonSuccessStatusToSpeechError() async {
-    StubURLProtocol.handler = { request in
-        (HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil,
-                         headerFields: nil)!, Data("server exploded".utf8))
+    @Test func returnsAudioBytes() async throws {
+        StubURLProtocol.handler = { request in ok(Data(count: 96000), url: request.url!) }
+        let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
+                                                session: stubbedSession())
+        let data = try await provider.synthesize(text: "hello", voice: "v", speed: 1.0)
+        #expect(data.count == 96000)
     }
-    let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
-                                            session: stubbedSession())
-    await #expect(throws: SpeechError.httpStatus(code: 500, body: "server exploded")) {
-        try await provider.synthesize(text: "hello", voice: "v", speed: 1.0)
-    }
-}
 
-@Test func parsesVoiceList() async throws {
-    let payload = Data("""
-    {"voices":[{"id":"af_bella","name":"af_bella"},{"id":"af_sky","name":"af_sky"}]}
-    """.utf8)
-    StubURLProtocol.handler = { request in
-        (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
-                         headerFields: ["Content-Type": "application/json"])!, payload)
+    @Test func mapsNonSuccessStatusToSpeechError() async {
+        StubURLProtocol.handler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil,
+                             headerFields: nil)!, Data("server exploded".utf8))
+        }
+        let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
+                                                session: stubbedSession())
+        await #expect(throws: SpeechError.httpStatus(code: 500, body: "server exploded")) {
+            try await provider.synthesize(text: "hello", voice: "v", speed: 1.0)
+        }
     }
-    let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
-                                            session: stubbedSession())
-    let voices = try await provider.listVoices()
-    #expect(voices.count == 2)
-    #expect(voices.first?.id == "af_bella")
-}
 
-@Test func identityProbeRejectsAServiceThatIsNotATtsEngine() async {
-    StubURLProtocol.handler = { request in
-        (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
-                         headerFields: ["Content-Type": "text/html"])!,
-         Data("<html><body>hello from some other app</body></html>".utf8))
+    @Test func parsesVoiceList() async throws {
+        let payload = Data("""
+        {"voices":[{"id":"af_bella","name":"af_bella"},{"id":"af_sky","name":"af_sky"}]}
+        """.utf8)
+        StubURLProtocol.handler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                             headerFields: ["Content-Type": "application/json"])!, payload)
+        }
+        let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
+                                                session: stubbedSession())
+        let voices = try await provider.listVoices()
+        #expect(voices.count == 2)
+        #expect(voices.first?.id == "af_bella")
     }
-    let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
-                                            session: stubbedSession())
-    let identified = await provider.identityProbe()
-    #expect(identified == false)
-}
 
-@Test func identityProbeAcceptsAValidVoiceList() async {
-    let payload = Data(#"{"voices":[{"id":"af_bella","name":"af_bella"}]}"#.utf8)
-    StubURLProtocol.handler = { request in
-        (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
-                         headerFields: ["Content-Type": "application/json"])!, payload)
+    @Test func identityProbeRejectsAServiceThatIsNotATtsEngine() async {
+        StubURLProtocol.handler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                             headerFields: ["Content-Type": "text/html"])!,
+             Data("<html><body>hello from some other app</body></html>".utf8))
+        }
+        let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
+                                                session: stubbedSession())
+        let identified = await provider.identityProbe()
+        #expect(identified == false)
     }
-    let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
-                                            session: stubbedSession())
-    #expect(await provider.identityProbe() == true)
+
+    @Test func identityProbeAcceptsAValidVoiceList() async {
+        let payload = Data(#"{"voices":[{"id":"af_bella","name":"af_bella"}]}"#.utf8)
+        StubURLProtocol.handler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                             headerFields: ["Content-Type": "application/json"])!, payload)
+        }
+        let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
+                                                session: stubbedSession())
+        #expect(await provider.identityProbe() == true)
+    }
 }
 
 // Helper: URLProtocol receives the body as a stream for async uploads.
