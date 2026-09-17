@@ -12,18 +12,24 @@ public struct Segmenter: Sendable {
     public struct Options: Sendable {
         /// Hard maximum. No chunk may exceed this.
         public var characterCap: Int = 150
-        /// The first chunk is smaller, to minimize time to first sound.
+        /// The first chunk is smaller, to minimize time to first sound. This is a
+        /// latency preference, not a safety invariant: if a single unit alone can't fit
+        /// under it (e.g. a hard-split fragment sized to `characterCap`), it is still
+        /// emitted as chunk 0 rather than being broken further. `characterCap` is the
+        /// only bound that may never be exceeded.
         public var firstChunkCap: Int = 100
         public init() {}
     }
 
     /// A piece of text destined for a chunk, plus whether a space separates it from
-    /// whatever precedes it in the same chunk.
+    /// whatever precedes it, wherever it lands.
     ///
-    /// `spaced` is false only for the second and later fragments produced by
-    /// hard-splitting a single word that alone exceeded the character cap (e.g. a long
-    /// URL). Those fragments were never separated by whitespace in the source, so
-    /// rejoining them with a space would insert a character that was never there.
+    /// `spaced` is false for: the second and later fragments produced by hard-splitting
+    /// a single word that alone exceeded the character cap (e.g. a long URL), and for a
+    /// clause piece that follows a clause-boundary delimiter (`,` `;` `:`) with no
+    /// actual whitespace after it in the source (again, a URL's "https:" is the
+    /// motivating case). In both cases there was never a real space at that seam, so
+    /// treating it as spaced would insert a character that was never in the input.
     private struct Unit {
         let text: String
         let spaced: Bool
@@ -78,38 +84,62 @@ public struct Segmenter: Sendable {
     private func splitOversized(_ sentence: String) -> [Unit] {
         var pieces: [Unit] = []
         for clause in splitAtClauseBoundaries(sentence) {
-            if clause.count <= options.characterCap {
-                pieces.append(Unit(text: clause, spaced: true))
+            if clause.text.count <= options.characterCap {
+                pieces.append(clause)
             } else {
-                pieces.append(contentsOf: splitAtWordBoundaries(clause))
+                pieces.append(contentsOf: splitAtWordBoundaries(clause.text, leadingSpaced: clause.spaced))
             }
         }
         return pieces
     }
 
-    private func splitAtClauseBoundaries(_ sentence: String) -> [String] {
-        var pieces: [String] = []
+    /// Splits on `,` `;` `:`, keeping the delimiter attached to the piece before it.
+    ///
+    /// Whether the *next* piece is `spaced` is derived from the source, not assumed: a
+    /// comma in prose is almost always followed by a real space ("here, and..."), but a
+    /// colon inside a URL ("https://...") is not. Checking the character right after the
+    /// delimiter — rather than hard-coding `true` — keeps clause splitting from
+    /// fabricating a space that was never in the input.
+    private func splitAtClauseBoundaries(_ sentence: String) -> [Unit] {
+        var pieces: [Unit] = []
         var current = ""
-        for character in sentence {
+        var spaced = true
+        var index = sentence.startIndex
+        while index < sentence.endIndex {
+            let character = sentence[index]
             current.append(character)
             if character == "," || character == ";" || character == ":" {
-                pieces.append(current.trimmingCharacters(in: .whitespaces))
+                let trimmed = current.trimmingCharacters(in: .whitespaces)
+                if !trimmed.isEmpty {
+                    pieces.append(Unit(text: trimmed, spaced: spaced))
+                }
                 current = ""
+                let next = sentence.index(after: index)
+                spaced = next < sentence.endIndex && sentence[next].isWhitespace
             }
+            index = sentence.index(after: index)
         }
         let tail = current.trimmingCharacters(in: .whitespaces)
-        if !tail.isEmpty { pieces.append(tail) }
-        return pieces.isEmpty ? [sentence] : pieces
+        if !tail.isEmpty {
+            pieces.append(Unit(text: tail, spaced: spaced))
+        }
+        return pieces.isEmpty ? [Unit(text: sentence, spaced: true)] : pieces
     }
 
-    private func splitAtWordBoundaries(_ clause: String) -> [Unit] {
+    /// `leadingSpaced` carries the spacing of the clause this word run came from: the
+    /// very first piece this call produces inherits it, since that seam is the clause
+    /// boundary handled by the caller. Every later piece within this call is a genuine
+    /// interior word-boundary split (on a literal `" "`) or a hard-split continuation, so
+    /// its spacing is decided locally.
+    private func splitAtWordBoundaries(_ clause: String, leadingSpaced: Bool) -> [Unit] {
         var pieces: [Unit] = []
         var current: [String] = []
         var length = 0
 
         func flushLine() {
             guard !current.isEmpty else { return }
-            pieces.append(Unit(text: current.joined(separator: " "), spaced: true))
+            let spaced = pieces.isEmpty ? leadingSpaced : true
+            pieces.append(Unit(text: current.joined(separator: " "), spaced: spaced))
             current = []
             length = 0
         }
@@ -122,7 +152,8 @@ public struct Segmenter: Sendable {
                 // Character boundaries so multi-byte grapheme clusters are never torn.
                 flushLine()
                 for (index, fragment) in hardSplit(word).enumerated() {
-                    pieces.append(Unit(text: fragment, spaced: index == 0))
+                    let spaced = index == 0 ? (pieces.isEmpty ? leadingSpaced : true) : false
+                    pieces.append(Unit(text: fragment, spaced: spaced))
                 }
                 continue
             }
@@ -164,41 +195,64 @@ public struct Segmenter: Sendable {
 
     private func pack(_ units: [Unit]) -> [Chunk] {
         var chunks: [Chunk] = []
-        var current: [Unit] = []
-        var length = 0
+        var currentText = ""
 
         func capForNextChunk() -> Int {
             chunks.isEmpty ? min(options.firstChunkCap, options.characterCap)
                            : options.characterCap
         }
 
-        func flush() {
-            guard !current.isEmpty else { return }
-            var text = ""
-            for unit in current {
-                if !text.isEmpty && unit.spaced { text += " " }
-                text += unit.text
-            }
+        func emit() {
+            guard !currentText.isEmpty else { return }
             chunks.append(Chunk(id: chunks.count,
-                                text: text,
-                                estimatedDuration: estimator.estimate(characterCount: text.count)))
-            current = []
-            length = 0
+                                text: currentText,
+                                estimatedDuration: estimator.estimate(characterCount: currentText.count)))
+            currentText = ""
         }
 
         for unit in units {
-            let addsSpaceIfAppended = !current.isEmpty && unit.spaced
-            let added = unit.text.count + (addsSpaceIfAppended ? 1 : 0)
-            if length + added > capForNextChunk(), !current.isEmpty {
-                flush()
+            let wantsSpace = !currentText.isEmpty && unit.spaced
+            let cap = capForNextChunk()
+            let need = (wantsSpace ? 1 : 0) + unit.text.count
+
+            if currentText.isEmpty || currentText.count + need <= cap {
+                // Fits in the chunk being built — or there's nothing to flush and this
+                // unit must be placed regardless (the accepted firstChunkCap overflow;
+                // characterCap can never be exceeded here since every unit is already
+                // sized to fit within it).
+                if wantsSpace { currentText += " " }
+                currentText += unit.text
+                continue
             }
-            // Recompute after a possible flush: `current` may now be empty, which
-            // changes whether this unit picks up a leading space.
-            let addsSpace = !current.isEmpty && unit.spaced
-            current.append(unit)
-            length += unit.text.count + (addsSpace ? 1 : 0)
+
+            // Doesn't fit alongside what's already here. Flush first. If a real space
+            // belongs between the outgoing text and this unit, don't let it vanish at
+            // the seam: attach it wherever there is room, preferring the front of the
+            // new chunk (so a clause/sentence boundary like "...it," doesn't end up with
+            // a trailing space baked into the outgoing chunk). characterCap outranks
+            // this: if neither side has room the space is dropped (cap wins) — this can
+            // only happen when both the outgoing chunk and the incoming unit are each
+            // already sized exactly to the cap, which is rare.
+            let outgoingHadRoomForTrailingSpace = currentText.count + 1 <= cap
+            emit()
+
+            guard wantsSpace else {
+                currentText = unit.text
+                continue
+            }
+            if 1 + unit.text.count <= options.characterCap {
+                currentText = " " + unit.text
+            } else if outgoingHadRoomForTrailingSpace, let last = chunks.indices.last {
+                let text = chunks[last].text + " "
+                chunks[last] = Chunk(id: chunks[last].id,
+                                     text: text,
+                                     estimatedDuration: estimator.estimate(characterCount: text.count))
+                currentText = unit.text
+            } else {
+                currentText = unit.text
+            }
         }
-        flush()
+        emit()
         return chunks
     }
 }

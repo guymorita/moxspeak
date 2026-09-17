@@ -61,6 +61,15 @@ private func makeSegmenter(cap: Int = 150, firstCap: Int = 100) -> Segmenter {
     #expect(chunks.map(\.text).joined() == emoji)
 }
 
+@Test func preservesEveryCharacterAcrossChunkBoundaries() {
+    let s = makeSegmenter()
+    let input = String(repeating: "a", count: 400) + " " + String(repeating: "b", count: 400)
+    let chunks = s.segment(input)
+    let total = chunks.reduce(0) { $0 + $1.characterCount }
+    #expect(total == input.count, "expected \(input.count) chars, chunks hold \(total)")
+    for c in chunks { #expect(c.characterCount <= 150) }
+}
+
 @Test func prefersClauseBoundariesInsideLongSentences() {
     let s = makeSegmenter(cap: 60, firstCap: 60)
     let text = "This clause is here, and this clause follows it, and a third one closes."
