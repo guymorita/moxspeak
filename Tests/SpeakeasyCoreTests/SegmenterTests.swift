@@ -40,6 +40,27 @@ private func makeSegmenter(cap: Int = 150, firstCap: Int = 100) -> Segmenter {
     }
 }
 
+@Test func hardSplitsASingleTokenLongerThanTheCap() {
+    let s = makeSegmenter()
+    // A bare URL with no spaces, far longer than the 150-char cap.
+    let url = "https://example.com/" + String(repeating: "segment/", count: 40)
+    let chunks = s.segment(url)
+    #expect(chunks.count > 1)
+    for c in chunks {
+        #expect(c.characterCount <= 150, "chunk \(c.id) was \(c.characterCount) chars")
+    }
+    // No character is lost or duplicated.
+    #expect(chunks.map(\.text).joined() == url)
+}
+
+@Test func neverSplitsMultiByteCharacters() {
+    let s = makeSegmenter()
+    let emoji = String(repeating: "categoría", count: 40) // accented, no spaces
+    let chunks = s.segment(emoji)
+    for c in chunks { #expect(c.characterCount <= 150) }
+    #expect(chunks.map(\.text).joined() == emoji)
+}
+
 @Test func prefersClauseBoundariesInsideLongSentences() {
     let s = makeSegmenter(cap: 60, firstCap: 60)
     let text = "This clause is here, and this clause follows it, and a third one closes."
