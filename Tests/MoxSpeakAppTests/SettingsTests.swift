@@ -8,13 +8,11 @@ import Foundation
 // through a real `UserDefaults`, in a throwaway suite so no test ever writes into the
 // app's own domain.
 
-private let offered = MenuBarController.rates  // 0.75, 1.0, 1.25, 1.5, 2.0
-
 // MARK: - First launch
 
 @Test func nothingStoredYieldsTheDefaults() {
     #expect(Settings.resolveVoice(stored: nil, available: []) == Settings.defaultVoice)
-    #expect(Settings.resolveRate(stored: nil, offered: offered) == Settings.defaultRate)
+    #expect(Settings.resolveRate(stored: nil) == Settings.defaultRate)
 }
 
 @Test func aFirstLaunchAgainstARealStoreReadsNothingBack() {
@@ -24,7 +22,7 @@ private let offered = MenuBarController.rates  // 0.75, 1.0, 1.25, 1.5, 2.0
         // The one that is easy to get wrong: `float(forKey:)` alone would answer 0 here,
         // and 0 resolves to a speed nobody chose.
         #expect(settings.storedRate == nil)
-        #expect(Settings.resolveRate(stored: settings.storedRate, offered: offered) == 1.0)
+        #expect(Settings.resolveRate(stored: settings.storedRate) == 1.0)
     }
 }
 
@@ -42,7 +40,22 @@ private let offered = MenuBarController.rates  // 0.75, 1.0, 1.25, 1.5, 2.0
 
         let voices = ["af_bella", "am_michael", "bf_emma"]
         #expect(Settings.resolveVoice(stored: reread.storedVoice, available: voices) == "am_michael")
-        #expect(Settings.resolveRate(stored: reread.storedRate, offered: offered) == 1.5)
+        #expect(Settings.resolveRate(stored: reread.storedRate) == 1.5)
+    }
+}
+
+/// The whole point of a slider over five presets: a precise, non-preset value written by
+/// the exact-value field has to come back exactly, not get pulled onto the nearest of the
+/// old five. Snapping is a slider-drag behaviour now (`SpeedControlTests`), not a
+/// restore-time one.
+@Test func aPreciseNonPresetRateSurvivesTheRoundTrip() {
+    withTemporaryDefaults { defaults in
+        let settings = Settings(defaults: defaults)
+        settings.storedRate = 1.32
+
+        let reread = Settings(defaults: defaults)
+        #expect(reread.storedRate == 1.32)
+        #expect(Settings.resolveRate(stored: reread.storedRate) == 1.32)
     }
 }
 
@@ -93,39 +106,38 @@ private let offered = MenuBarController.rates  // 0.75, 1.0, 1.25, 1.5, 2.0
 // MARK: - Speeds that are not speeds
 
 @Test func anOutOfRangeSpeedClamps() {
-    // 9× is past what the audio unit will honour at all; it comes back as the fastest
-    // speed the app actually offers rather than as 9, or as a silent clamp downstream
-    // that leaves the menu showing something the ear never hears.
-    #expect(Settings.resolveRate(stored: 9.0, offered: offered) == 2.0)
-    #expect(Settings.resolveRate(stored: 0.01, offered: offered) == 0.75)
+    // 9× is past what `PlaybackEngine.rate` will honour at all — see
+    // `rateOfZeroCannotHangPlayback` in `PlaybackEngineTests` for exactly what an
+    // unclamped rate did before that clamp existed. It comes back at the range's edge
+    // rather than as 9, or as a silent clamp downstream that leaves the menu showing a
+    // number the ear never hears.
+    #expect(Settings.resolveRate(stored: 9.0) == 3.0)
+    #expect(Settings.resolveRate(stored: 0.01) == 0.5)
 }
 
 @Test func aNonsenseSpeedFallsBackRatherThanClamping() {
     // Zero, negative and NaN are not out-of-range speeds, they are corruption — a key
     // written by something that is not this app. Clamping them would dress junk up as a
     // choice; the default says plainly that nothing usable was found.
-    #expect(Settings.resolveRate(stored: 0, offered: offered) == Settings.defaultRate)
-    #expect(Settings.resolveRate(stored: -1.5, offered: offered) == Settings.defaultRate)
-    #expect(Settings.resolveRate(stored: .nan, offered: offered) == Settings.defaultRate)
-    #expect(Settings.resolveRate(stored: .infinity, offered: offered) == Settings.defaultRate)
+    #expect(Settings.resolveRate(stored: 0) == Settings.defaultRate)
+    #expect(Settings.resolveRate(stored: -1.5) == Settings.defaultRate)
+    #expect(Settings.resolveRate(stored: .nan) == Settings.defaultRate)
+    #expect(Settings.resolveRate(stored: .infinity) == Settings.defaultRate)
 }
 
-@Test func anInRangeSpeedThatIsNotOnOfferSnapsToTheNearestOne() {
-    // In range, so nothing downstream would complain — but no menu item would be ticked,
-    // which is the "looks configured, isn't" state worth preventing.
-    #expect(Settings.resolveRate(stored: 1.3, offered: offered) == 1.25)
-    #expect(Settings.resolveRate(stored: 1.9, offered: offered) == 2.0)
+@Test func anInRangePreciseSpeedIsLeftExactlyAlone() {
+    // The old five-preset menu snapped an in-range stray value onto the nearest preset.
+    // The slider offers the whole range now, so a value like 1.3 or 1.9 is not stray —
+    // it is exactly the kind of thing the exact-value field exists to produce, and
+    // restoring it as anything else would be losing the user's own choice.
+    #expect(Settings.resolveRate(stored: 1.3) == 1.3)
+    #expect(Settings.resolveRate(stored: 1.9) == 1.9)
 }
 
-@Test func everyOfferedSpeedSurvivesResolution() {
-    for rate in offered {
-        #expect(Settings.resolveRate(stored: rate, offered: offered) == rate)
+@Test func everyCommonValueSurvivesResolutionUnchanged() {
+    for rate in SpeedControl.commonValues {
+        #expect(Settings.resolveRate(stored: rate) == rate)
     }
-}
-
-@Test func withNothingOnOfferAnInRangeSpeedIsLeftAlone() {
-    #expect(Settings.resolveRate(stored: 1.3, offered: []) == 1.3)
-    #expect(Settings.resolveRate(stored: 9.0, offered: []) == 3.0)  // still clamped
 }
 
 // MARK: - Helper

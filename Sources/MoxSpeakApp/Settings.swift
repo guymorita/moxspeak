@@ -147,26 +147,24 @@ struct Settings {
         return available[0]
     }
 
-    /// Picks the speed to actually use, given what was stored and what the menu offers.
+    /// Picks the speed to actually use, given what was stored.
     ///
-    /// Three steps, each guarding against a different kind of junk:
+    /// Two steps, each guarding against a different kind of junk:
     ///
     /// 1. Absent, non-finite or non-positive is not a speed at all — that is a missing
     ///    key, a corrupted value, or something written by a future version. Default.
     /// 2. Clamp into `PlaybackEngine.rateRange`, the range the audio unit will actually
     ///    honour. Anything outside it would be silently clamped downstream anyway; doing
     ///    it here means the menu and the ear agree.
-    /// 3. Snap to the nearest speed the app can offer. The app itself only ever writes
-    ///    one of these five, so anything else came from somewhere else — and a rate with
-    ///    no matching menu item is exactly the "looks configured, isn't" state this whole
-    ///    function exists to prevent. Skipped when nothing is on offer.
-    static func resolveRate(stored: Float?, offered: [Float]) -> Float {
+    ///
+    /// Unlike voice or engine, a stored speed is never snapped to one of a handful of
+    /// values: the speed control offers the whole range, not five presets, so 1.32 is as
+    /// legitimate a restored value as 1.25 is. (`SpeedControl.snapped` still exists — it
+    /// governs a slider *drag*, which is a UI gesture with no business here.)
+    static func resolveRate(stored: Float?) -> Float {
         guard let stored, stored.isFinite, stored > 0 else { return defaultRate }
 
         let range = PlaybackEngine.rateRange
-        let clamped = min(max(stored, range.lowerBound), range.upperBound)
-
-        guard !offered.isEmpty else { return clamped }
-        return offered.min(by: { abs($0 - clamped) < abs($1 - clamped) }) ?? clamped
+        return min(max(stored, range.lowerBound), range.upperBound)
     }
 }
