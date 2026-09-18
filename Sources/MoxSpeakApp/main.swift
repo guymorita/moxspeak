@@ -36,6 +36,17 @@ final class MoxSpeakAppDelegate: NSObject, NSApplicationDelegate {
         AppLog.write("launch: pid \(ProcessInfo.processInfo.processIdentifier), "
                      + "AXIsProcessTrusted=\(trusted) — select-to-speak "
                      + (trusted ? "available" : "off, reading the clipboard"))
+
+        // The clipboard's starting line. Select-to-speak will speak a clipboard the user
+        // has filled *since* MoxSpeak last acted on it; without a mark taken here, the
+        // first press of a session would see a clipboard from yesterday, find no record
+        // of having looked at it, and have to guess. Taking the baseline now means the
+        // first press is judged by the same rule as every press after it.
+        let clipboardBaseline = SelectionReader.recordClipboardBaseline()
+        AppLog.write("clipboard: baseline change count \(clipboardBaseline) — anything "
+                     + "copied from here on counts as freshly copied and will be spoken "
+                     + "when nothing is selected; what is on it already will not")
+
         let controller = AppController(port: Self.port)
         self.controller = controller
         controller.start()
