@@ -101,47 +101,57 @@ import Testing
     }
 }
 
-/// The defaults, and the two properties that chose them.
+/// The defaults, and the properties that chose them.
 ///
 /// The three labels are asserted so that changing one has to be deliberate. The rest is
-/// the part with teeth: a default has to be a key the left hand can reach while that same
-/// hand is holding ⌃⌥, and it has to stay off the combinations that were measured as
-/// already spoken for. Space and Period were both defaults once, and both were occupied.
+/// the part with teeth: where a default is allowed to live, and what it is not allowed to
+/// collide with.
 @Test func theDefaultsAreOneHandedAndUncontested() {
     #expect(HotkeyAction.speak.defaultHotkey.label == "⌃⌥S")
-    #expect(HotkeyAction.pause.defaultHotkey.label == "⌃⌥C")
+    #expect(HotkeyAction.pause.defaultHotkey.label == "⌃⌥D")
     #expect(HotkeyAction.stop.defaultHotkey.label == "⌃⌥X")
 
-    // Reachable by the index or middle finger with ⌃ under the pinky and ⌥ under the ring
-    // finger. A, Q and Z are left-hand keys but sit under the pinky, which is occupied.
+    // Reachable by the same hand that is holding ⌃⌥ — whether that is thumb-on-modifiers
+    // with the index pressing the key, which is how it is actually held, or pinky-and-ring
+    // on the modifiers. A, Q and Z sit under the pinky, which is occupied in one grip and
+    // out of reach in the other; everything right of T/G/B needs the second hand.
     let oneHanded: Set<UInt32> = [
         UInt32(kVK_ANSI_W), UInt32(kVK_ANSI_E), UInt32(kVK_ANSI_R), UInt32(kVK_ANSI_T),
         UInt32(kVK_ANSI_S), UInt32(kVK_ANSI_D), UInt32(kVK_ANSI_F), UInt32(kVK_ANSI_G),
         UInt32(kVK_ANSI_X), UInt32(kVK_ANSI_C), UInt32(kVK_ANSI_V), UInt32(kVK_ANSI_B),
     ]
 
-    // Measured rather than guessed. Space is Apple's own ⌃⌥ binding — Select Next Input
-    // Source, symbolic hotkey 61 — and the letters are the block Karabiner-Elements was
-    // remapping away from Control on the machine this was checked on, a configuration
-    // common enough among people who care about keyboards to be worth designing around.
-    let taken: Set<UInt32> = [
-        UInt32(kVK_Space), UInt32(kVK_ANSI_Period), UInt32(kVK_ANSI_Comma),
-        UInt32(kVK_ANSI_Semicolon),
-        UInt32(kVK_ANSI_A), UInt32(kVK_ANSI_D), UInt32(kVK_ANSI_E), UInt32(kVK_ANSI_F),
-        UInt32(kVK_ANSI_H), UInt32(kVK_ANSI_I), UInt32(kVK_ANSI_J), UInt32(kVK_ANSI_K),
-        UInt32(kVK_ANSI_L), UInt32(kVK_ANSI_M), UInt32(kVK_ANSI_N), UInt32(kVK_ANSI_P),
-        UInt32(kVK_ANSI_R), UInt32(kVK_ANSI_U), UInt32(kVK_ANSI_W), UInt32(kVK_ANSI_Y),
-    ]
+    // Two combinations that were tried as defaults and turned out to be spoken for.
+    // Space is Apple's own ⌃⌥ binding — Select Next Input Source, symbolic hotkey 61 —
+    // so it is taken on any Mac that has not switched it off. Period collided with
+    // something else on the machine this was built for: both handlers fired.
+    let contested: Set<UInt32> = [UInt32(kVK_Space), UInt32(kVK_ANSI_Period)]
 
     for action in HotkeyAction.allCases {
         let hotkey = action.defaultHotkey
         #expect(oneHanded.contains(hotkey.keyCode),
                 Comment(rawValue: "the default \(action.rawValue) shortcut "
                                   + "\(hotkey.label) cannot be pressed with one hand"))
-        #expect(!taken.contains(hotkey.keyCode),
+        #expect(!contested.contains(hotkey.keyCode),
                 Comment(rawValue: "the default \(action.rawValue) shortcut "
                                   + "\(hotkey.label) was measured as already taken"))
     }
+
+    // Speak and Pause are the pair pressed over and over while reading, so they share the
+    // home row and sit a column apart — no travel between them. With the thumb rolled
+    // onto ⌃⌥ the hand rotates and the index finger lands around D and F, which puts the
+    // bottom letter row down and to the left of it — that is why ⌃⌥C was rejected by the
+    // person using it as a stretch.
+    let homeRow: Set<UInt32> = [
+        UInt32(kVK_ANSI_A), UInt32(kVK_ANSI_S), UInt32(kVK_ANSI_D),
+        UInt32(kVK_ANSI_F), UInt32(kVK_ANSI_G),
+    ]
+    #expect(homeRow.contains(HotkeyAction.speak.defaultHotkey.keyCode))
+    #expect(homeRow.contains(HotkeyAction.pause.defaultHotkey.keyCode))
+
+    // Stop is the destructive one — it discards the queue — so it deliberately does not
+    // sit next to the key the hand is already resting on.
+    #expect(!homeRow.contains(HotkeyAction.stop.defaultHotkey.keyCode))
 
     // Three distinct keys behind one modifier set, so the hand learns one shape.
     let keys = HotkeyAction.allCases.map(\.defaultHotkey.keyCode)
