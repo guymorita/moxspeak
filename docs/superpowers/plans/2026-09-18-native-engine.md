@@ -25,13 +25,23 @@ Everything below serves one of these. If a task serves none, it does not belong.
 
 ---
 
-## Phase 1 — TextNormalizer *(in progress)*
+## Phase 1 — TextNormalizer ✅ *(done 2026-09-18)*
 
 Own the number-to-words layer so no engine has to do it for us.
 
 `TextNormalizer` in `MoxSpeakCore`, separate from `TextPreparer` (formatting vs language — different jobs, different timing). `SpeechProvider` gains `requiresTextNormalization`; the HTTP provider returns `false` (Kokoro-FastAPI normalizes server-side and doubling it corrupts text), a native provider returns `true`.
 
-**Done when:** phoneme match rate against Python misaki is measured and materially above the 50% baseline, with remaining failures named.
+**Result:** feeding MisakiSwift and Python misaki the *same normalized text* took agreement
+from **40.7% to 87.3%** across a 150-input corpus, with **zero regressions**. Every remaining
+gap is pronunciation, not normalization — which was the blocker on going native. 215 tests.
+
+Worth recording: on roughly a third of the corpus the Python reference is itself wrong
+("3:30" read with the colon aloud, "12mm" as "twelve m", "Mt." as "em tee"), so raw match
+rate against it understates the result.
+
+**Known gap, needs an owner before native ships:** URLs and emails are not normalized at
+all, and are the worst remaining MisakiSwift failure. Relevant because web articles are a
+primary use case.
 
 ---
 
@@ -169,6 +179,24 @@ Re-tune the native first-chunk size against measured time-to-first-sound rather 
 **Done when:** the HTTP provider still gets 150, the native provider gets its own measured value, and a test pins that the session honours the provider.
 
 ---
+
+### DECIDED: distribution *(2026-09-18)*
+
+**Bundle one model in the app; downloadable models are an addition, never the foundation.**
+
+The app ships with weights inside it so first launch works offline with no network, no
+setup step and no failure mode. If a better model appears later, support downloading
+*additional* ones — flexibility layered on top of a working out-of-box experience rather
+than in place of it. Nobody is ever left with an app that does nothing until a download
+succeeds.
+
+Two facts make the download cost smaller than it appears: the model is frozen (13 months
+without a commit), so it is fetched once ever; and because the weights never change, delta
+updates keep later app updates near 20 MB rather than 360 MB.
+
+Open: whether **MLX fp16** is acoustically clean. The fp16 regression measured in Phase 2
+came through ONNX and may be a conversion artifact. If MLX fp16 holds up, the model halves
+to ~160 MB and bundle size stops being a question. Measure it in Phase 3.
 
 ## Phase 5 — Bundle everything, and keep the build honest
 
