@@ -73,6 +73,9 @@ final class HotkeyManager {
 
         static let optionShiftSpace = Shortcut(
             keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey | shiftKey), label: "⌥⇧Space")
+
+        static let optionShiftPeriod = Shortcut(
+            keyCode: UInt32(kVK_ANSI_Period), modifiers: UInt32(optionKey | shiftKey), label: "⌥⇧.")
     }
 
     enum Failure: Error, CustomStringConvertible {

@@ -86,7 +86,7 @@ final class MenuBarController: NSObject {
         // to the same action.
         configure(speakItem, title: "Speak Clipboard  (⌥⇧S)", action: #selector(speakClipboard))
         configure(pauseItem, title: "Pause  (⌥⇧Space)", action: #selector(togglePause))
-        configure(stopItem, title: "Stop", action: #selector(stop))
+        configure(stopItem, title: "Stop  (⌥⇧.)", action: #selector(stop))
 
         menu.addItem(.separator())
 
@@ -147,13 +147,13 @@ final class MenuBarController: NSObject {
         let description: String
         switch state {
         case .idle:
-            symbol = "speaker.wave.2"
+            symbol = "diamond"
             description = "MoxSpeak: idle"
         case .speaking:
-            symbol = "speaker.wave.2.fill"
+            symbol = "diamond.fill"
             description = "MoxSpeak: speaking"
         case .paused:
-            symbol = "pause.fill"
+            symbol = "diamond.lefthalf.filled"
             description = "MoxSpeak: paused"
         case .error:
             symbol = "exclamationmark.triangle"

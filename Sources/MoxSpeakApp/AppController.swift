@@ -83,6 +83,11 @@ final class AppController {
         } catch {
             problems.append("\(error)")
         }
+        do {
+            try hotkeys.register(.optionShiftPeriod) { [weak self] in self?.stop() }
+        } catch {
+            problems.append("\(error)")
+        }
 
         guard !problems.isEmpty else { return }
 
