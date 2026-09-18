@@ -277,3 +277,42 @@ The HUD with its scrub bar, sentence-level navigation, memory spill-to-disk, and
   `spctl` reports `rejected — source=Unnotarized Developer ID`, so a copied build needs
   right-click-Open or the quarantine attribute cleared. Notarization becomes necessary if
   this is ever shared publicly.
+
+---
+
+## Boxed for later
+
+Deferred deliberately, not forgotten.
+
+**Notarization.** Developer ID signing alone does not clear Gatekeeper on another Mac.
+macOS 15+ removed the right-click-Open bypass, so an unnotarized build gets a dead-end
+"could not verify … Move to Trash" dialog — confirmed on the macOS 26 machine.
+
+Required before sharing publicly; every downloader hits the same wall. One-time setup, and
+the credential step needs the owner because it uses his Apple ID:
+
+```bash
+xcrun notarytool store-credentials "moxspeak-notary" \
+  --apple-id "<apple-id>" --team-id 9F9SXNU23N
+```
+
+(app-specific password from appleid.apple.com → Sign-In and Security). After that,
+`build-app.sh` gains a submit-and-staple step and the problem is gone permanently.
+
+Immediate workaround meanwhile: `xattr -dr com.apple.quarantine <path>`, or System Settings
+→ Privacy & Security → Open Anyway.
+
+**Verifying macOS 26.** Unresolved and still the sharpest open risk: whether Carbon
+`RegisterEventHotKey` still works there. It is the only global-hotkey API needing no
+Accessibility permission, and it has been deprecated for a decade. Blocked behind
+notarization, since the app would not launch on that machine.
+
+Also unverified there: SF Symbol availability for the gem, media keys, and AX selection
+reading.
+
+**Note:** the work Mac gets much easier once the native engine lands — the awkwardness today
+is that it would need Kokoro-FastAPI installed. Native removes that entirely; the machine
+needs nothing but the app.
+
+**URL and email normalization.** Phase 1's known gap, still unowned. The worst remaining
+MisakiSwift failure, and relevant because web articles are a primary use case.
