@@ -167,3 +167,88 @@ private func makeSegmenter(cap: Int = 150, firstCap: Int = 100) -> Segmenter {
     let rejoinedWords = rejoined.split(separator: " ").map(String.init)
     #expect(originalWords == rejoinedWords)
 }
+
+// MARK: - Source offsets (C3)
+
+@Test func sourceOffsetsIndexBackIntoThePreparedString() {
+    let s = makeSegmenter(cap: 50, firstCap: 50)
+    let sentences = [
+        "Sentence number one is right here.",
+        "Sentence number two follows next.",
+        "Sentence number three comes after.",
+        "Sentence number four is the last one.",
+    ]
+    let text = sentences.joined(separator: " ")
+    let chunks = s.segment(text)
+
+    #expect(chunks.count > 1, "the input must actually span multiple chunks for this test to mean anything")
+    for chunk in chunks {
+        let start = text.index(text.startIndex, offsetBy: chunk.sourceStart)
+        let end = text.index(text.startIndex, offsetBy: chunk.sourceEnd)
+        #expect(String(text[start..<end]) == chunk.text,
+                "chunk \(chunk.id) offsets [\(chunk.sourceStart), \(chunk.sourceEnd)) don't match its text \"\(chunk.text)\"")
+    }
+}
+
+@Test func sourceOffsetsAreMonotonicAcrossChunks() {
+    let s = makeSegmenter(cap: 50, firstCap: 50)
+    let text = String(repeating: "This is an ordinary sentence for offset testing. ", count: 10)
+    let chunks = s.segment(text)
+
+    #expect(chunks.count > 1, "the input must actually span multiple chunks for this test to mean anything")
+    for i in 1..<chunks.count {
+        #expect(chunks[i].sourceStart >= chunks[i - 1].sourceStart,
+                "chunk \(i) start regressed relative to chunk \(i - 1)")
+        #expect(chunks[i].sourceStart >= chunks[i - 1].sourceEnd,
+                "chunk \(i) starts at \(chunks[i].sourceStart), before chunk \(i - 1) ends at \(chunks[i - 1].sourceEnd)")
+    }
+}
+
+@Test func sentenceOffsetsLocateSentenceStartsWithinChunkText() {
+    let s = makeSegmenter()   // default cap 150 / firstCap 100 — everything below fits in chunk 0
+    let sentenceTexts = ["One sentence here.", "Another one follows.", "And a third one too."]
+    let chunks = s.segment(sentenceTexts.joined(separator: " "))
+
+    #expect(chunks.count == 1, "expected everything to pack into a single chunk for this test to mean anything")
+    let chunk = chunks[0]
+    #expect(chunk.sentenceOffsets.count == sentenceTexts.count)
+
+    for (offset, expected) in zip(chunk.sentenceOffsets, sentenceTexts) {
+        let start = chunk.text.index(chunk.text.startIndex, offsetBy: offset)
+        let prefix = String(chunk.text[start...].prefix(expected.count))
+        #expect(prefix == expected, "sentenceOffset \(offset) does not point at \"\(expected)\", got \"\(prefix)\"")
+    }
+}
+
+@Test func duplicateChunkTextGetsDistinctCorrectSourceOffsets() {
+    // Sized so the sentence exactly fills a chunk on its own: this is precisely the
+    // "both sides sit exactly at the cap" case where the packer drops the boundary
+    // space (see Segmenter.pack) rather than fabricating one, so the second occurrence's
+    // chunk.text is byte-identical to the first occurrence's chunk.text. A
+    // reimplementation that recovered offsets by searching the source for chunk.text
+    // (instead of tracking them through packing) would find only the FIRST occurrence
+    // and report it for both chunks — this test fails exactly that implementation.
+    let sentence = "The quick fox jumps."
+    let cap = sentence.count
+    let s = makeSegmenter(cap: cap, firstCap: cap)
+    let text = "\(sentence) \(sentence)"
+    let chunks = s.segment(text)
+
+    #expect(chunks.count == 2, "expected the identical sentence to land in two separate chunks")
+    #expect(chunks[0].text == sentence)
+    #expect(chunks[1].text == sentence, "identical text in both chunks is the point of this test")
+
+    #expect(chunks[0].sourceStart == 0)
+    #expect(chunks[0].sourceEnd == sentence.count)
+    #expect(chunks[1].sourceStart == sentence.count + 1,
+            "must point at the SECOND occurrence, not be a copy of the first chunk's offset")
+    #expect(chunks[1].sourceEnd == sentence.count + 1 + sentence.count)
+
+    // Ground truth: indexing `text` with each chunk's own offsets recovers the right
+    // occurrence for both chunks, not just the first.
+    for chunk in chunks {
+        let start = text.index(text.startIndex, offsetBy: chunk.sourceStart)
+        let end = text.index(text.startIndex, offsetBy: chunk.sourceEnd)
+        #expect(String(text[start..<end]) == chunk.text)
+    }
+}

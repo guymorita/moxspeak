@@ -22,7 +22,7 @@ public struct Segmenter: Sendable {
     }
 
     /// A piece of text destined for a chunk, plus whether a space separates it from
-    /// whatever precedes it, wherever it lands.
+    /// whatever precedes it, wherever it lands, plus where it came from in the source.
     ///
     /// `spaced` is false for: the second and later fragments produced by hard-splitting
     /// a single word that alone exceeded the character cap (e.g. a long URL), and for a
@@ -30,9 +30,24 @@ public struct Segmenter: Sendable {
     /// actual whitespace after it in the source (again, a URL's "https:" is the
     /// motivating case). In both cases there was never a real space at that seam, so
     /// treating it as spaced would insert a character that was never in the input.
+    ///
+    /// `sourceStart`/`sourceEnd` are `Character` offsets into the `trimmed` string built
+    /// at the top of `segment(_:)` — carried forward from wherever this unit's text was
+    /// actually extracted (a sentence range, a clause range, a word range, or a hard-split
+    /// fragment), never recomputed by searching for the text afterward. Searching breaks
+    /// on repeated text and can't recover the dropped-space case; threading the offset
+    /// through each split step is the only way that's actually correct.
+    ///
+    /// `startsSentence` marks the very first unit produced for a given sentence — the one
+    /// whose `sourceStart` is where a new sentence begins. Every later unit that sentence
+    /// was split into (clause pieces, word-boundary pieces, hard-split fragments) is a
+    /// continuation, not a new sentence start.
     private struct Unit {
         let text: String
         let spaced: Bool
+        let sourceStart: Int
+        let sourceEnd: Int
+        var startsSentence: Bool = false
     }
 
     private let options: Options
@@ -48,46 +63,77 @@ public struct Segmenter: Sendable {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
+        // `trimmed` may start later than `text` (leading whitespace/newlines stripped).
+        // Every offset computed below is relative to `trimmed`; this is added back at
+        // the end so chunks index into `text` — the prepared string callers actually
+        // handed us — rather than into our own internal, further-trimmed copy of it.
+        let leadingTrim: Int
+        if let contentRange = trimmedIndices(of: text.startIndex..<text.endIndex, in: text,
+                                             isWhitespace: isWhitespaceOrNewline) {
+            leadingTrim = text.distance(from: text.startIndex, to: contentRange.lowerBound)
+        } else {
+            leadingTrim = 0
+        }
+
         // Units are sentences; anything over the cap is pre-split into clause or word
         // pieces so the packer only ever sees things that fit.
         var units: [Unit] = []
         for sentence in sentences(in: trimmed) {
-            if sentence.count <= options.characterCap {
-                units.append(Unit(text: sentence, spaced: true))
+            var sentenceUnits: [Unit]
+            if sentence.text.count <= options.characterCap {
+                sentenceUnits = [Unit(text: sentence.text, spaced: true,
+                                      sourceStart: sentence.start,
+                                      sourceEnd: sentence.start + sentence.text.count)]
             } else {
-                units.append(contentsOf: splitOversized(sentence))
+                sentenceUnits = splitOversized(sentence.text, base: sentence.start)
             }
+            // Only the first unit this sentence produced is where the sentence actually
+            // starts; everything after it is a continuation of the same sentence.
+            if !sentenceUnits.isEmpty {
+                sentenceUnits[0].startsSentence = true
+            }
+            units.append(contentsOf: sentenceUnits)
         }
 
-        return pack(units)
+        return pack(units, offsetAdjustment: leadingTrim)
     }
 
     // MARK: - Sentence detection
 
-    private func sentences(in text: String) -> [String] {
+    private func sentences(in text: String) -> [(text: String, start: Int)] {
         // NLTokenizer knows that "Dr." is not a sentence end.
         let tokenizer = NLTokenizer(unit: .sentence)
         tokenizer.string = text
-        var result: [String] = []
+        var result: [(String, Int)] = []
         tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
-            let s = text[range].trimmingCharacters(in: .whitespacesAndNewlines)
-            if !s.isEmpty { result.append(s) }
+            guard let trimmedRange = trimmedIndices(of: range, in: text,
+                                                     isWhitespace: isWhitespaceOrNewline) else {
+                return true
+            }
+            let s = String(text[trimmedRange])
+            let start = text.distance(from: text.startIndex, to: trimmedRange.lowerBound)
+            result.append((s, start))
             return true
         }
-        return result.isEmpty ? [text] : result
+        return result.isEmpty ? [(text, 0)] : result
     }
 
     // MARK: - Oversized sentence handling
 
     /// Clause boundaries first, then words. Never mid-word — unless a single word alone
     /// exceeds the cap, in which case the cap wins (see `splitAtWordBoundaries`).
-    private func splitOversized(_ sentence: String) -> [Unit] {
+    ///
+    /// `base` is this sentence's absolute start offset (into `trimmed`), so every piece
+    /// produced below can report its own absolute offset rather than one relative to
+    /// whatever substring it was carved from.
+    private func splitOversized(_ sentence: String, base: Int) -> [Unit] {
         var pieces: [Unit] = []
-        for clause in splitAtClauseBoundaries(sentence) {
+        for clause in splitAtClauseBoundaries(sentence, base: base) {
             if clause.text.count <= options.characterCap {
                 pieces.append(clause)
             } else {
-                pieces.append(contentsOf: splitAtWordBoundaries(clause.text, leadingSpaced: clause.spaced))
+                pieces.append(contentsOf: splitAtWordBoundaries(clause.text, base: clause.sourceStart,
+                                                                 leadingSpaced: clause.spaced))
             }
         }
         return pieces
@@ -100,30 +146,42 @@ public struct Segmenter: Sendable {
     /// colon inside a URL ("https://...") is not. Checking the character right after the
     /// delimiter — rather than hard-coding `true` — keeps clause splitting from
     /// fabricating a space that was never in the input.
-    private func splitAtClauseBoundaries(_ sentence: String) -> [Unit] {
+    private func splitAtClauseBoundaries(_ sentence: String, base: Int) -> [Unit] {
         var pieces: [Unit] = []
         var current = ""
+        var currentStart = 0
         var spaced = true
+        var pos = 0
         var index = sentence.startIndex
         while index < sentence.endIndex {
             let character = sentence[index]
             current.append(character)
             if character == "," || character == ";" || character == ":" {
-                let trimmed = current.trimmingCharacters(in: .whitespaces)
-                if !trimmed.isEmpty {
-                    pieces.append(Unit(text: trimmed, spaced: spaced))
-                }
+                appendClausePiece(&pieces, raw: current, rawStart: currentStart, base: base, spaced: spaced)
                 current = ""
                 let next = sentence.index(after: index)
+                currentStart = pos + 1
                 spaced = next < sentence.endIndex && sentence[next].isWhitespace
             }
+            pos += 1
             index = sentence.index(after: index)
         }
-        let tail = current.trimmingCharacters(in: .whitespaces)
-        if !tail.isEmpty {
-            pieces.append(Unit(text: tail, spaced: spaced))
+        appendClausePiece(&pieces, raw: current, rawStart: currentStart, base: base, spaced: spaced)
+        if pieces.isEmpty {
+            pieces = [Unit(text: sentence, spaced: true, sourceStart: base, sourceEnd: base + sentence.count)]
         }
-        return pieces.isEmpty ? [Unit(text: sentence, spaced: true)] : pieces
+        return pieces
+    }
+
+    /// Trims `raw` exactly as the original clause splitter did (`.whitespaces`, not
+    /// `.whitespacesAndNewlines`) and, if anything survives, appends a `Unit` whose
+    /// offset accounts for however many leading whitespace characters were stripped.
+    private func appendClausePiece(_ pieces: inout [Unit], raw: String, rawStart: Int, base: Int, spaced: Bool) {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let leading = raw.prefix(while: isClauseWhitespace).count
+        let start = base + rawStart + leading
+        pieces.append(Unit(text: trimmed, spaced: spaced, sourceStart: start, sourceEnd: start + trimmed.count))
     }
 
     /// `leadingSpaced` carries the spacing of the clause this word run came from: the
@@ -131,39 +189,52 @@ public struct Segmenter: Sendable {
     /// boundary handled by the caller. Every later piece within this call is a genuine
     /// interior word-boundary split (on a literal `" "`) or a hard-split continuation, so
     /// its spacing is decided locally.
-    private func splitAtWordBoundaries(_ clause: String, leadingSpaced: Bool) -> [Unit] {
+    ///
+    /// `base` is `clause`'s own absolute start offset, so a word's position within
+    /// `clause` (from `wordsWithPositions`) converts to an absolute offset by simple
+    /// addition.
+    private func splitAtWordBoundaries(_ clause: String, base: Int, leadingSpaced: Bool) -> [Unit] {
         var pieces: [Unit] = []
-        var current: [String] = []
+        var current: [(text: String, start: Int)] = []
         var length = 0
 
         func flushLine() {
             guard !current.isEmpty else { return }
             let spaced = pieces.isEmpty ? leadingSpaced : true
-            pieces.append(Unit(text: current.joined(separator: " "), spaced: spaced))
+            let text = current.map(\.text).joined(separator: " ")
+            let start = current[0].start
+            let last = current[current.count - 1]
+            let end = last.start + last.text.count
+            pieces.append(Unit(text: text, spaced: spaced, sourceStart: start, sourceEnd: end))
             current = []
             length = 0
         }
 
-        for word in clause.split(separator: " ").map(String.init) {
+        for (word, localStart) in wordsWithPositions(clause) {
+            let absStart = base + localStart
             if word.count > options.characterCap {
                 // A single word longer than the cap can't be emitted whole: the cap is
                 // the hard constraint (silent audio loss above it), so it wins over
                 // "never split mid-word" for this one pathological case. Split on
                 // Character boundaries so multi-byte grapheme clusters are never torn.
                 flushLine()
+                var fragmentStart = absStart
                 for (index, fragment) in hardSplit(word).enumerated() {
                     let spaced = index == 0 ? (pieces.isEmpty ? leadingSpaced : true) : false
-                    pieces.append(Unit(text: fragment, spaced: spaced))
+                    let fragmentEnd = fragmentStart + fragment.count
+                    pieces.append(Unit(text: fragment, spaced: spaced,
+                                       sourceStart: fragmentStart, sourceEnd: fragmentEnd))
+                    fragmentStart = fragmentEnd
                 }
                 continue
             }
             let added = current.isEmpty ? word.count : word.count + 1
             if length + added > options.characterCap, !current.isEmpty {
                 flushLine()
-                current = [word]
+                current = [(word, absStart)]
                 length = word.count
             } else {
-                current.append(word)
+                current.append((word, absStart))
                 length += added
             }
         }
@@ -191,11 +262,83 @@ public struct Segmenter: Sendable {
         return fragments
     }
 
+    // MARK: - Offset helpers
+
+    /// True for a `Character` made of exactly one Unicode scalar that is itself a member
+    /// of `set`. Whitespace is always single-scalar in the text this type handles, so
+    /// this reproduces `String.trimmingCharacters(in:)`'s behavior at the granularity
+    /// (`Character`) the rest of this type works in, letting offsets be computed by
+    /// counting characters rather than re-deriving them from a `String.Index` walk.
+    private func matches(_ character: Character, _ set: CharacterSet) -> Bool {
+        guard character.unicodeScalars.count == 1, let scalar = character.unicodeScalars.first else {
+            return false
+        }
+        return set.contains(scalar)
+    }
+
+    private func isClauseWhitespace(_ character: Character) -> Bool {
+        matches(character, .whitespaces)
+    }
+
+    private func isWhitespaceOrNewline(_ character: Character) -> Bool {
+        matches(character, .whitespacesAndNewlines)
+    }
+
+    /// The sub-range of `range` (within `s`) left after trimming characters matching
+    /// `isWhitespace` from both ends — index-based, so the caller can recover exactly
+    /// where the trimmed text sits in `s`, which `String.trimmingCharacters(in:)` alone
+    /// throws away. Returns nil if nothing survives.
+    private func trimmedIndices(of range: Range<String.Index>, in s: String,
+                                isWhitespace: (Character) -> Bool) -> Range<String.Index>? {
+        var lower = range.lowerBound
+        while lower < range.upperBound, isWhitespace(s[lower]) {
+            lower = s.index(after: lower)
+        }
+        var upper = range.upperBound
+        while upper > lower, isWhitespace(s[s.index(before: upper)]) {
+            upper = s.index(before: upper)
+        }
+        return lower < upper ? lower..<upper : nil
+    }
+
+    /// Splits on a literal `" "` character, exactly like `s.split(separator: " ")`
+    /// (consecutive spaces collapse, leading/trailing spaces are dropped) — but keeps
+    /// each word's `Character` offset within `s`, which `split(separator:)` discards.
+    private func wordsWithPositions(_ s: String) -> [(text: String, start: Int)] {
+        var result: [(String, Int)] = []
+        var word: [Character] = []
+        var wordStart = 0
+        var pos = 0
+        var index = s.startIndex
+        while index < s.endIndex {
+            let character = s[index]
+            if character == " " {
+                if !word.isEmpty {
+                    result.append((String(word), wordStart))
+                    word = []
+                }
+            } else {
+                if word.isEmpty { wordStart = pos }
+                word.append(character)
+            }
+            pos += 1
+            index = s.index(after: index)
+        }
+        if !word.isEmpty { result.append((String(word), wordStart)) }
+        return result
+    }
+
     // MARK: - Packing
 
-    private func pack(_ units: [Unit]) -> [Chunk] {
+    /// `offsetAdjustment` converts a unit's `trimmed`-relative offset into one relative
+    /// to the original `text` argument of `segment(_:)` — the prepared string the caller
+    /// actually handed us.
+    private func pack(_ units: [Unit], offsetAdjustment: Int) -> [Chunk] {
         var chunks: [Chunk] = []
         var currentText = ""
+        var currentStart: Int?
+        var currentEnd = 0
+        var currentSentenceOffsets: [Int] = []
 
         func capForNextChunk() -> Int {
             chunks.isEmpty ? min(options.firstChunkCap, options.characterCap)
@@ -206,14 +349,38 @@ public struct Segmenter: Sendable {
             guard !currentText.isEmpty else { return }
             chunks.append(Chunk(id: chunks.count,
                                 text: currentText,
-                                estimatedDuration: estimator.estimate(characterCount: currentText.count)))
+                                estimatedDuration: estimator.estimate(characterCount: currentText.count),
+                                sourceStart: currentStart ?? offsetAdjustment,
+                                sourceEnd: currentEnd,
+                                sentenceOffsets: currentSentenceOffsets))
             currentText = ""
+            currentStart = nil
+            currentSentenceOffsets = []
+        }
+
+        /// Starts a brand-new chunk-in-progress with `unit` as its only content so far.
+        ///
+        /// `leadingSourceSpace` is true only when `textOverride` prepends a synthetic
+        /// `" "` that represents a real separator character actually present in the
+        /// source immediately before `unit` (the "attach the seam space to the front of
+        /// the new chunk" case below) — in which case `sourceStart` must start one
+        /// character earlier than `unit.sourceStart` so this chunk's `[sourceStart,
+        /// sourceEnd)` still covers exactly what `text` holds. It must NOT be set for the
+        /// dropped-space case: there, nothing was written into `currentText` for that
+        /// seam, so `sourceStart` staying at `unit.sourceStart` is already correct.
+        func startNewChunk(with unit: Unit, textOverride: String? = nil, sentenceOffset: Int = 0,
+                           leadingSourceSpace: Bool = false) {
+            currentText = textOverride ?? unit.text
+            currentStart = unit.sourceStart + offsetAdjustment - (leadingSourceSpace ? 1 : 0)
+            currentEnd = unit.sourceEnd + offsetAdjustment
+            if unit.startsSentence { currentSentenceOffsets.append(sentenceOffset) }
         }
 
         for unit in units {
             let wantsSpace = !currentText.isEmpty && unit.spaced
             let cap = capForNextChunk()
             let need = (wantsSpace ? 1 : 0) + unit.text.count
+            let unitAbsEnd = unit.sourceEnd + offsetAdjustment
 
             if currentText.isEmpty || currentText.count + need <= cap {
                 // Fits in the chunk being built — or there's nothing to flush and this
@@ -221,7 +388,10 @@ public struct Segmenter: Sendable {
                 // characterCap can never be exceeded here since every unit is already
                 // sized to fit within it).
                 if wantsSpace { currentText += " " }
+                if unit.startsSentence { currentSentenceOffsets.append(currentText.count) }
                 currentText += unit.text
+                if currentStart == nil { currentStart = unit.sourceStart + offsetAdjustment }
+                currentEnd = unitAbsEnd
                 continue
             }
 
@@ -232,24 +402,35 @@ public struct Segmenter: Sendable {
             // a trailing space baked into the outgoing chunk). characterCap outranks
             // this: if neither side has room the space is dropped (cap wins) — this can
             // only happen when both the outgoing chunk and the incoming unit are each
-            // already sized exactly to the cap, which is rare.
+            // already sized exactly to the cap, which is rare. The dropped space is
+            // still correctly unrepresented in the next chunk's sourceStart: that offset
+            // comes from the unit itself, not from counting characters in `currentText`,
+            // so it points at the unit's real position in the source whether or not a
+            // space was written into the text right before it.
             let outgoingHadRoomForTrailingSpace = currentText.count + 1 <= cap
             emit()
 
             guard wantsSpace else {
-                currentText = unit.text
+                startNewChunk(with: unit)
                 continue
             }
             if 1 + unit.text.count <= options.characterCap {
-                currentText = " " + unit.text
+                startNewChunk(with: unit, textOverride: " " + unit.text, sentenceOffset: 1,
+                             leadingSourceSpace: true)
             } else if outgoingHadRoomForTrailingSpace, let last = chunks.indices.last {
                 let text = chunks[last].text + " "
                 chunks[last] = Chunk(id: chunks[last].id,
                                      text: text,
-                                     estimatedDuration: estimator.estimate(characterCount: text.count))
-                currentText = unit.text
+                                     estimatedDuration: estimator.estimate(characterCount: text.count),
+                                     sourceStart: chunks[last].sourceStart,
+                                     // The source really does have a space here (wantsSpace
+                                     // is true), so extending sourceEnd by one keeps this
+                                     // chunk's [sourceStart, sourceEnd) matching its text.
+                                     sourceEnd: chunks[last].sourceEnd + 1,
+                                     sentenceOffsets: chunks[last].sentenceOffsets)
+                startNewChunk(with: unit)
             } else {
-                currentText = unit.text
+                startNewChunk(with: unit)
             }
         }
         emit()

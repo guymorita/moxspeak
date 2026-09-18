@@ -38,10 +38,34 @@ public struct Chunk: Equatable, Sendable, Identifiable {
     public let text: String
     public let estimatedDuration: TimeInterval
 
-    public init(id: Int, text: String, estimatedDuration: TimeInterval) {
+    /// This chunk's span in the prepared text that was handed to `Segmenter.segment`,
+    /// in `Character` units: `sourceStart..<sourceEnd`. Integer offsets rather than
+    /// `Range<String.Index>` because they're trivial to reason about and to serialize,
+    /// and `String.Index` from one string isn't valid against another.
+    ///
+    /// Not always exactly `text.count` characters wide: packing joins units with a
+    /// synthetic single space that isn't always literally present at that seam in the
+    /// source (see `Segmenter`'s known dropped-space case), so `sourceEnd - sourceStart`
+    /// can differ slightly from `text.count`. What's guaranteed is that this chunk's
+    /// content was drawn only from `[sourceStart, sourceEnd)` of the prepared text.
+    public let sourceStart: Int
+    public let sourceEnd: Int
+
+    /// Start of each sentence contained in this chunk, as a `Character` offset relative
+    /// to this chunk's own `text` (not the source). A chunk usually holds several
+    /// sentences; a sentence that started in an earlier chunk and merely continues here
+    /// (because it was hard-split across a chunk boundary) is NOT listed again — only
+    /// actual sentence starts are.
+    public let sentenceOffsets: [Int]
+
+    public init(id: Int, text: String, estimatedDuration: TimeInterval,
+                sourceStart: Int, sourceEnd: Int, sentenceOffsets: [Int]) {
         self.id = id
         self.text = text
         self.estimatedDuration = estimatedDuration
+        self.sourceStart = sourceStart
+        self.sourceEnd = sourceEnd
+        self.sentenceOffsets = sentenceOffsets
     }
 
     public var characterCount: Int { text.count }
