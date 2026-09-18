@@ -135,7 +135,41 @@ envelope suite is where this gets watched.
 
 ---
 
-## Phase 3 — NativeSpeechProvider
+## Phase 3a — MLX integration ✅ *(done 2026-09-18)*
+
+Two open risks in this plan closed, both favourably.
+
+**`xcodebuild` is NOT required — the project stays on Swift Package Manager.** The spike
+was right that `swift build` cannot *compile* MLX's Metal kernels, and wrong that they must
+be compiled at app-build time: MLX checks for an `mlx.metallib` colocated with the binary
+before it checks the SwiftPM bundle. `Scripts/build-metallib.sh` produces one in ~6s with
+the same 382 exported functions. This removes the single largest durability risk here.
+
+**fp16 is acoustically clean in MLX** — the Phase 2 regression was an ONNX conversion
+artifact and does not reproduce:
+
+| | mel LSD vs PyTorch | TTFA |
+|---|---|---|
+| f32 | 4.86 dB | 0.345 s |
+| **fp16 (ship this)** | **4.85 dB** | 0.355 s |
+| HTTP server (control) | 6.30 dB | 1.949 s |
+
+fp16 against our own f32: 0.85 dB, cosine 0.9994 — six times tighter than either is to
+PyTorch. Model halves 312 → 156 MB, peak RSS 519 → 377 MB. Buys size, not speed.
+
+**Verified rather than assumed:** `MoxSpeakCore.build` contains zero MLX objects and no
+Core source imports MLX; `mlx-swift` pinned `exact: "0.30.2"`; macOS 14 floor proven by the
+compiler (availability violations are compile errors) — upstream's "macOS 15" was buying
+Swift 6.2 *language* features, not OS APIs; models gitignored, repo stays 6.8 MB; licences
+and upstream commits recorded in `Sources/Vendor/VENDORED.md`. 237 tests.
+
+**Carried forward:** nobody has run this on macOS 26 — only forward-compatibility
+properties were proven. And MisakiSwift's POS tagger is OS-supplied `NaturalLanguage`, so
+heteronyms may *sound* slightly different between the two machines.
+
+---
+
+## Phase 3b — NativeSpeechProvider
 
 - **Vendor MisakiSwift into the repo** rather than depending on it. It is a small, low-adoption package doing something core; an unmaintained dependency for pronunciation is exactly the fragility this plan exists to remove. Vendoring also lets us carry our own fixes. Record its licence (Apache-2.0) and upstream commit.
 - Implement `NativeSpeechProvider: SpeechProvider` around the Phase 2 backend: `requiresTextNormalization = true`, its own `recommendedCharacterCap`, and an honest `outputFormat`.
