@@ -201,6 +201,33 @@ else
 fi
 codesign --verify --verbose=1 "${APP}" 2>&1 | sed 's/^/    /'
 
+# Notarization. Optional, because it needs the network and an Apple round trip of a
+# couple of minutes — but required for the app to open on any Mac other than the one that
+# built it. Without it Gatekeeper shows "cannot verify it is free of malware" with no
+# Open Anyway button on macOS 15+, which is a dead end for whoever you gave it to.
+#
+# Set up once with:
+#   xcrun notarytool store-credentials "moxspeak-notary" \
+#     --apple-id <apple-id> --team-id 9F9SXNU23N
+#
+# Note the ticket is stapled into the bundle, so copy the result with `ditto`, never
+# `rsync` — rsync does not faithfully preserve a signed bundle and strips the signature.
+if [ -n "${MOXSPEAK_NOTARIZE:-}" ]; then
+    echo "==> notarizing (a few minutes)"
+    NOTARIZE_ZIP="$(mktemp -d)/MoxSpeak.zip"
+    ditto -c -k --keepParent "${APP}" "${NOTARIZE_ZIP}"
+    if xcrun notarytool submit "${NOTARIZE_ZIP}" \
+           --keychain-profile "${MOXSPEAK_NOTARY_PROFILE:-moxspeak-notary}" \
+           --wait --timeout 20m; then
+        xcrun stapler staple "${APP}"
+        spctl -a -vv "${APP}" 2>&1 | sed 's/^/    /'
+    else
+        echo "    notarization failed — the app still runs here, but not on other Macs"
+        exit 1
+    fi
+    rm -rf "$(dirname "${NOTARIZE_ZIP}")"
+fi
+
 echo
 echo "==> size"
 # MiB throughout (du reports 1024-byte blocks); the zipped line also gives the decimal MB
