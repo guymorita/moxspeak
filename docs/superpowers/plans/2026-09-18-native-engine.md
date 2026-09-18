@@ -72,6 +72,39 @@ single-utterance latency.
 Low-end viability overrides the decision rule only if an option looks genuinely unusable —
 degrading catastrophically rather than gracefully, or a footprint that breaks 8 GB.
 
+### DECIDED: MLX *(2026-09-18)*
+
+| Backend | Median TTFA | Notes |
+|---|---|---|
+| **MLX** | **0.359 s** | chosen |
+| ONNX f32 | 1.606 s | +1.247 s — twelve times the 100 ms tolerance |
+| ONNX fp16 | 1.376 s | quality regression: mel LSD 9.49 dB |
+| ONNX int8 | 4.443 s | slower *and* worse — 10.71 dB |
+
+The rule said take ONNX within 100 ms. It missed by more than a second, reproduced
+independently in Python, so the rule chose MLX without needing interpretation.
+
+**The fact that collapsed the argument:** ONNX would not have escaped MLX anyway.
+`MisakiSwift` depends on `mlx-swift` for phonemization, so the project carries MLX
+regardless of inference backend. Taking ONNX would have cost 1.2 s per utterance and left
+the same build-system exposure. The durability case for ONNX was real but moot.
+
+Also established, and worth keeping:
+
+- ONNX **does** build under plain `swift build` — Microsoft ships an official SPM package
+  with a remote binary target. Noted in case MLX ever becomes untenable and this decision
+  is revisited; the fallback path is known to work.
+- Quantization is a dead end here. No "faster and still sounds right" option exists.
+- ONNX f32 was the most acoustically faithful thing measured (1.44 dB LSD vs PyTorch).
+  MLX at 4.85 dB is still better than the Python server we run today at 6.30 dB, so this
+  is an improvement over the status quo, not a compromise against it.
+- Peak RSS 595 MB (ONNX f32); comfortable on an 8 GB machine.
+
+**Unresolved and carried forward:** whether MLX's lead holds on a base Air. MLX would need
+a 4.5x regression merely to tie ONNX's M2 Max figure, so inversion is unlikely — but it is
+unproven, and `mlx-swift` exposes no GPU limiter to test it with. The Phase 3 performance
+envelope suite is where this gets watched.
+
 **Done when:** a number exists and the decision is recorded with its reasoning.
 
 ---
@@ -142,7 +175,12 @@ Re-tune the native first-chunk size against measured time-to-first-sound rather 
 - Model weights, lexicon and voice data ship **inside the `.app`**. No Application Support directory, no download on first run, works offline.
 - `build-app.sh` assembles and signs with the Developer ID identity (already done — grants survive rebuilds).
 - Record the resulting bundle size. The spike estimated ~362 MB.
-- If Phase 2 chose MLX, the app target moves to `xcodebuild`; `MoxSpeakCore` stays SPM-testable either way.
+- Phase 2 chose MLX, so the app target may need `xcodebuild` — `swift build` reportedly
+  cannot compile MLX's Metal kernels. **Investigate shipping a prebuilt `.metallib`
+  instead**; the spike produced one (~3.8 MB), which suggests the kernels need not be
+  compiled from source at app-build time. If that works, the project stays on SPM and the
+  single largest durability risk in this plan disappears. `MoxSpeakCore` stays
+  SPM-testable either way.
 
 **Done when:** the assembled `.app` runs on a machine with no Python and no Kokoro server.
 
