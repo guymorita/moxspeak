@@ -35,11 +35,17 @@ final class SpeedControlView: NSView {
 
     /// Left edge of a standard menu item's title, and the mirrored gap kept on the
     /// right — measured against "Voice" and the submenu chevron on "Engine".
-    /// 21, not 24. Measured rather than guessed: screenshot the open menu, find the
-    /// leftmost inked pixel of each row, and the plain items ("Voice", "Engine", "Quit")
-    /// all land on the same column. At 24 this row sat three points right of them, which
-    /// reads as a wobble in the left edge of the whole menu.
-    private static let leftInset: CGFloat = 21
+    /// 22, and the exact value matters — the owner could see one point of drift.
+    ///
+    /// There is no public AppKit constant for a menu item's own text inset, so this was
+    /// measured: screenshot the open menu, then find the leftmost inked pixel of each row.
+    /// Compare against **"Speak Clipboard", not "Voice"** — same leading glyph, so the
+    /// comparison is not confounded by the different left side bearings of S and V, which
+    /// is what made the first two attempts overshoot in opposite directions.
+    ///
+    /// At the captured scale one point is two pixels. 24 put this row 4px right of the
+    /// others, 21 put it 2px left, 22.5 put it 1px right. 22 lands on the same pixel.
+    private static let leftInset: CGFloat = 22
     private static let rightInset: CGFloat = 20
 
     /// Wide enough to be the widest thing in the menu itself, so this row defines the
