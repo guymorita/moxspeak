@@ -12,7 +12,10 @@ import Foundation
 /// dependencies.
 enum AppLog {
 
-    private static let fileURL: URL? = {
+    /// Where the log is. Readable so `Reset` deletes exactly the file this writes rather
+    /// than a path spelled out a second time somewhere else — two copies of a path is how
+    /// an "uninstall" ends up leaving the log behind.
+    static let fileURL: URL? = {
         guard let logs = try? FileManager.default.url(for: .libraryDirectory,
                                                       in: .userDomainMask,
                                                       appropriateFor: nil,
@@ -24,6 +27,30 @@ enum AppLog {
     private static let maximumBytes = 512 * 1024
 
     private static let lock = NSLock()
+
+    /// Set by `stopLogging()` and never cleared: a reset is a one-way door for the rest
+    /// of the process.
+    ///
+    /// Without this, "delete the log" would be a lie by the time the user got to the
+    /// Trash — `applicationWillTerminate` writes `terminate`, which recreates the file on
+    /// the way out and leaves a one-line log behind on a machine the user believes is
+    /// clean. Guarded by the same lock as `write`, so a line already on its way cannot
+    /// slip in after the file has gone.
+    ///
+    /// `nonisolated(unsafe)` is load-bearing rather than a silenced diagnostic: every
+    /// read and every write below happens inside `lock`, which is the external
+    /// synchronisation the compiler is asking after. (Contrast `SelectionReader`, which
+    /// refuses the same annotation — there it would have been covering an SDK global that
+    /// nothing synchronises at all.)
+    nonisolated(unsafe) private static var isStopped = false
+
+    /// Stops writing for the remainder of this launch. The next launch logs normally —
+    /// this suppresses the log of an app being uninstalled, not logging as a feature.
+    static func stopLogging() {
+        lock.lock()
+        defer { lock.unlock() }
+        isStopped = true
+    }
 
     private static let timestamp: DateFormatter = {
         let formatter = DateFormatter()
@@ -38,6 +65,7 @@ enum AppLog {
 
         lock.lock()
         defer { lock.unlock() }
+        guard !isStopped else { return }
 
         let manager = FileManager.default
         if !manager.fileExists(atPath: fileURL.path) {

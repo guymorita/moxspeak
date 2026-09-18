@@ -371,29 +371,91 @@ public struct TextNormalizer: Sendable {
 
     // MARK: - Times
 
-    /// "3:30" -> "three thirty", "3:00" -> "three o'clock", "12:05" -> "twelve oh five".
+    /// "3:30" -> "three thirty", "3:00" -> "three o'clock", "12:05" -> "twelve oh five",
+    /// "5:45pm" -> "five forty five p m", "9am" -> "nine a m",
+    /// "2:04:36" -> "two hours four minutes thirty six seconds".
     ///
     /// A deliberate divergence from the reference, which leaves the colon in place and
     /// phonemizes "3:30" as "three : thirty" with an audible break. There is no reading of
     /// a clock time in which that is right.
+    ///
+    /// `h:mm` (with an optional am/pm) is read as a clock time. `h:mm:ss` and `hh:mm:ss` are
+    /// read as a duration instead — three colon-separated fields is the shape of a stopwatch
+    /// or a running time ("the video is 2:04:36 long"), not of anything anyone reads aloud as
+    /// a moment in the day, so that is the reading picked when only the field count is known.
+    /// A three-field run with an am/pm suffix attached is rare enough, and ambiguous enough,
+    /// that it is left untouched rather than guessed at.
     private func expandTimes(_ text: String) -> String {
-        // The whole colon-separated run is matched, not just the first two fields. Matching
-        // `h:mm` alone would find "23:45" inside "1:23:45" and read a stopwatch as a clock.
-        // A run with anything other than one colon is left exactly as it was.
-        text.replacing(/\b(\d{1,2})((?::\d{1,2})+)(?![\d:])/) { match in
+        var out = text
+
+        // The whole colon-separated run is matched, not just the first two fields, so a
+        // three-field stopwatch reading is told apart from a clock time rather than having
+        // its first two fields misread as one. An am/pm suffix — spaced, glued, dotted, or
+        // not — is captured with it so it lands in the same replacement as the time itself.
+        out = out.replacing(/\b(\d{1,2})((?::\d{1,2})+)(?:[ \t]?([AaPp]\.?[Mm]\.?))?\b/) { match in
             let fields = match.2.split(separator: ":").map(String.init)
-            guard fields.count == 1, let hour = Int(match.1), let minute = Int(fields[0]),
-                  fields[0].count == 2, (0...23).contains(hour), (0...59).contains(minute)
-            else { return String(match.0) }
-            return Self.spokenTime(hour: hour, minute: minute)
+            let meridiem = match.3.map(String.init)
+
+            if fields.count == 1 {
+                guard let hour = Int(match.1), let minute = Int(fields[0]), fields[0].count == 2,
+                      (0...59).contains(minute),
+                      meridiem == nil ? (0...23).contains(hour) : (1...12).contains(hour)
+                else { return String(match.0) }
+                return Self.spokenTime(hour: hour, minute: minute, meridiem: meridiem)
+            }
+
+            if fields.count == 2, meridiem == nil {
+                guard let hour = Int(match.1), let minute = Int(fields[0]), let second = Int(fields[1]),
+                      fields[0].count == 2, fields[1].count == 2,
+                      (0...59).contains(minute), (0...59).contains(second)
+                else { return String(match.0) }
+                return Self.spokenDuration(hours: hour, minutes: minute, seconds: second)
+            }
+
+            return String(match.0)
         }
+
+        // A bare hour with no colon at all — "9am", "9 AM", "9 p.m." — never reached the rule
+        // above, which requires at least one colon field.
+        out = out.replacing(/\b(\d{1,2})[ \t]?([AaPp]\.?[Mm]\.?)\b/) { match in
+            guard let hour = Int(match.1), (1...12).contains(hour) else { return String(match.0) }
+            return Self.spokenTime(hour: hour, minute: 0, meridiem: String(match.2))
+        }
+
+        return out
     }
 
-    private static func spokenTime(hour: Int, minute: Int) -> String {
+    private static func spokenTime(hour: Int, minute: Int, meridiem: String? = nil) -> String {
         let hourWords = NumberWords.cardinal(hour)
-        if minute == 0 { return hourWords + " o'clock" }
-        if minute < 10 { return hourWords + " oh " + NumberWords.ones[minute] }
-        return hourWords + " " + NumberWords.cardinal(minute)
+        let meridiemWords = meridiem.map(spokenMeridiem)
+        if minute == 0 {
+            guard let meridiemWords else { return hourWords + " o'clock" }
+            return hourWords + " " + meridiemWords
+        }
+        let minuteWords = minute < 10 ? "oh " + NumberWords.ones[minute] : NumberWords.cardinal(minute)
+        let core = hourWords + " " + minuteWords
+        guard let meridiemWords else { return core }
+        return core + " " + meridiemWords
+    }
+
+    /// "am", "AM", "a.m.", "A.M." all read the same way: the two letters, spoken.
+    private static func spokenMeridiem(_ raw: String) -> String {
+        raw.first?.lowercased() == "a" ? "a m" : "p m"
+    }
+
+    /// "2:04:36" -> "two hours four minutes thirty six seconds". A zero-valued field is
+    /// dropped rather than spoken, matching how this is said aloud ("two hours and thirty
+    /// six seconds", not "two hours zero minutes thirty six seconds").
+    private static func spokenDuration(hours: Int, minutes: Int, seconds: Int) -> String {
+        var parts: [String] = []
+        if hours > 0 { parts.append(NumberWords.cardinal(hours) + " " + unit("hour", hours)) }
+        if minutes > 0 { parts.append(NumberWords.cardinal(minutes) + " " + unit("minute", minutes)) }
+        if seconds > 0 { parts.append(NumberWords.cardinal(seconds) + " " + unit("second", seconds)) }
+        return parts.isEmpty ? "zero seconds" : parts.joined(separator: " ")
+    }
+
+    private static func unit(_ word: String, _ count: Int) -> String {
+        count == 1 ? word : word + "s"
     }
 
     // MARK: - Version strings

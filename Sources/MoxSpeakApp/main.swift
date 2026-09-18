@@ -46,6 +46,13 @@ final class MoxSpeakAppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+// Before anything AppKit: `MOXSPEAK_SELFTEST=1` checks that this bundle can speak using
+// only what is inside it, prints where each asset resolved from, and exits. It never
+// returns, so no status item is created and no normal launch touches this line.
+if NativeSelfTest.isRequested() {
+    NativeSelfTest.run()
+}
+
 let application = NSApplication.shared
 application.setActivationPolicy(.accessory)
 

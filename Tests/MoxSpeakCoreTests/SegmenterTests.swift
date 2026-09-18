@@ -9,6 +9,39 @@ private func makeSegmenter(cap: Int = 150, firstCap: Int = 100) -> Segmenter {
     return Segmenter(options: o)
 }
 
+// MARK: - Segmenter.Options.init(providerCap:)
+//
+// The constructor `SpeechSession` uses to build a provider's segmenter (Phase 4:
+// `recommendedCharacterCap` was declared since the speech core shipped and, until now,
+// never read). Pinned directly, independent of `SpeechSession`, so a regression in the
+// relationship between `characterCap` and `firstChunkCap` shows up at the smallest unit
+// that can express it.
+
+@Test func providerCapOf150MatchesTheHTTPProvidersLongstandingDefault() {
+    // The HTTP provider's 150 exists only as a workaround for the PyTorch-MPS truncation
+    // bug, and this is the exact pair `Segmenter()`'s own defaults already produced --
+    // adopting the provider's number must not change behavior for the HTTP path.
+    let o = Segmenter.Options(providerCap: 150)
+    #expect(o.characterCap == 150)
+    #expect(o.firstChunkCap == 100)
+}
+
+@Test func providerCapOf100MatchesTheNativeProvidersMeasuredValue() {
+    let o = Segmenter.Options(providerCap: 100)
+    #expect(o.characterCap == 100)
+    #expect(o.firstChunkCap == 100)
+}
+
+@Test func firstChunkCapIsClampedWhenAProviderDeclaresACapBelowTheLatencyDefault() {
+    // firstChunkCap governs time-to-first-sound and can only ever lower, never raise,
+    // relative to characterCap -- so a provider declaring something smaller than the
+    // segmenter's own latency-tuned default (100) must pull firstChunkCap down with it,
+    // rather than leaving an inconsistent pair where firstChunkCap > characterCap.
+    let o = Segmenter.Options(providerCap: 40)
+    #expect(o.characterCap == 40)
+    #expect(o.firstChunkCap == 40, "firstChunkCap must never exceed characterCap")
+}
+
 @Test func noChunkExceedsTheCap() {
     let s = makeSegmenter()
     let text = String(repeating: "This is a sentence of moderate length. ", count: 40)

@@ -48,15 +48,28 @@ struct EngineHealth: Sendable {
     /// boundary belongs to the healthy side, and the tests pin that.
     let slowThreshold: TimeInterval
 
+    /// The one action a user could take when the engine is slow, in their own terms.
+    ///
+    /// Supplied rather than hardcoded because it stopped being true for every engine.
+    /// "Restarting it may help" is sound advice about a server somebody started in a
+    /// terminal; it is meaningless about an engine that *is* this process, where the
+    /// equivalent is quitting and reopening MoxSpeak. Advice that does not match the
+    /// thing it is about is worse than none — it sends the user to fix something that
+    /// is not there.
+    let slowHint: String
+
     private var samples: [TimeInterval] = []
     private var unreachableReason: String?
 
-    init(windowSize: Int = 8, slowThreshold: TimeInterval = 2.5) {
+    init(windowSize: Int = 8,
+         slowThreshold: TimeInterval = 2.5,
+         slowHint: String = "restarting it may help") {
         // A zero or negative window would make `record` a no-op and the status
         // permanently `.unknown` — health reporting that silently reports nothing is
         // worse than none, so the window is floored at one sample.
         self.windowSize = max(1, windowSize)
         self.slowThreshold = slowThreshold
+        self.slowHint = slowHint
     }
 
     // MARK: - Recording
@@ -132,7 +145,7 @@ struct EngineHealth: Sendable {
         case .healthy(let median):
             return "Voice engine is responsive (\(Self.format(median)))"
         case .slow(let median):
-            return "Voice engine is slow (\(Self.format(median))) — restarting it may help"
+            return "Voice engine is slow (\(Self.format(median))) — \(slowHint)"
         }
     }
 

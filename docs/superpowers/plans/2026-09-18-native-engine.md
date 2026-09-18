@@ -13,7 +13,23 @@ Everything below serves one of these. If a task serves none, it does not belong.
 2. **Fast.** Sub-half-second to first sound. The spike measured 0.359s native against
    1.949s for the current server, on an M2 Max.
 3. **Stateless.** Run 200 is as fast as run 1. The old engine leaked ~28 MB per request; this must be structurally impossible to regress into, and proven by a test.
-4. **Durable.** Still builds and runs in three years. Minimize and pin what can move underneath us.
+4. **Durable.** Still builds and runs in three years. Minimize and pin what can move
+   underneath us.
+5. **Works across macOS versions.** Deployment target stays `.macOS(.v14)`. The owner runs
+   14.6 on one machine and **macOS 26** on another, and both must work. Prefer
+   version-agnostic APIs; where something recent is needed, guard with `if #available` and
+   provide a fallback rather than raising the floor for everyone.
+
+   **The open risk here is Carbon.** `RegisterEventHotKey` is the only global-hotkey API
+   that needs no Accessibility permission — the reason this app installs without prompts —
+   and it has been deprecated for over a decade. If it has been removed in macOS 26, global
+   hotkeys break there and the design needs rethinking. Testing the current build on the
+   macOS 26 machine settles it cheaply and should happen before more is built on the
+   assumption. The migration path, if needed, is `CGEventTap` plus an Accessibility prompt —
+   which costs the no-permission property.
+
+   Also unverified across versions: SF Symbol availability for the menu bar gem, and whether
+   a prebuilt `.metallib` is portable across OS versions and GPU generations.
 
 ## Standing constraints
 
@@ -119,7 +135,41 @@ envelope suite is where this gets watched.
 
 ---
 
-## Phase 3 — NativeSpeechProvider
+## Phase 3a — MLX integration ✅ *(done 2026-09-18)*
+
+Two open risks in this plan closed, both favourably.
+
+**`xcodebuild` is NOT required — the project stays on Swift Package Manager.** The spike
+was right that `swift build` cannot *compile* MLX's Metal kernels, and wrong that they must
+be compiled at app-build time: MLX checks for an `mlx.metallib` colocated with the binary
+before it checks the SwiftPM bundle. `Scripts/build-metallib.sh` produces one in ~6s with
+the same 382 exported functions. This removes the single largest durability risk here.
+
+**fp16 is acoustically clean in MLX** — the Phase 2 regression was an ONNX conversion
+artifact and does not reproduce:
+
+| | mel LSD vs PyTorch | TTFA |
+|---|---|---|
+| f32 | 4.86 dB | 0.345 s |
+| **fp16 (ship this)** | **4.85 dB** | 0.355 s |
+| HTTP server (control) | 6.30 dB | 1.949 s |
+
+fp16 against our own f32: 0.85 dB, cosine 0.9994 — six times tighter than either is to
+PyTorch. Model halves 312 → 156 MB, peak RSS 519 → 377 MB. Buys size, not speed.
+
+**Verified rather than assumed:** `MoxSpeakCore.build` contains zero MLX objects and no
+Core source imports MLX; `mlx-swift` pinned `exact: "0.30.2"`; macOS 14 floor proven by the
+compiler (availability violations are compile errors) — upstream's "macOS 15" was buying
+Swift 6.2 *language* features, not OS APIs; models gitignored, repo stays 6.8 MB; licences
+and upstream commits recorded in `Sources/Vendor/VENDORED.md`. 237 tests.
+
+**Carried forward:** nobody has run this on macOS 26 — only forward-compatibility
+properties were proven. And MisakiSwift's POS tagger is OS-supplied `NaturalLanguage`, so
+heteronyms may *sound* slightly different between the two machines.
+
+---
+
+## Phase 3b — NativeSpeechProvider
 
 - **Vendor MisakiSwift into the repo** rather than depending on it. It is a small, low-adoption package doing something core; an unmaintained dependency for pronunciation is exactly the fragility this plan exists to remove. Vendoring also lets us carry our own fixes. Record its licence (Apache-2.0) and upstream commit.
 - Implement `NativeSpeechProvider: SpeechProvider` around the Phase 2 backend: `requiresTextNormalization = true`, its own `recommendedCharacterCap`, and an honest `outputFormat`.
@@ -168,7 +218,54 @@ something observed rather than a guess.
 
 ---
 
-## Phase 4 — Let the provider set the chunk size
+## Phase 3b — NativeSpeechProvider ✅ *(done 2026-09-18)*
+
+253 tests. Core still builds with zero MLX objects; native suites **skip** rather than fail
+when `Models/` is absent.
+
+**Statelessness proven — after the test itself was caught lying.** The first version
+asserted on resident memory and **passed with a real 17 MB-per-call cache in place**: malloc
+holds ~15 MB of unreturned slack, so RSS moved only 2.2 MB. Rewritten to assert on live
+malloc bytes (sensitive) *and* resident (catches leaks that skip malloc).
+
+- Red with cache in: heap +17.1 MB against a 4 MB limit.
+- Green with cache out: heap +0.1 MB.
+- **200-utterance soak: 92.9 MB of audio through, heap +0.6 MB, run 200 at 1.01× run 5.**
+
+That is the fifth test in this project caught passing with the thing it tested removed.
+
+**`recommendedCharacterCap = 100`, and the reasoning inverted.** There is no fixed cost per
+synthesis to amortize — release timing is linear, 0.229–0.251 s per 100 chars from 40 to 400.
+So latency does not set the cap. Memory does (1.2 GB @60, 1.7 GB @100, 2.1 GB @150, 2.8 GB
+@400) together with language: ~100 chars is the smallest chunk that still holds a whole
+English sentence.
+
+**Two findings that change how we think about the engine:**
+
+- **MLX's CPU path is not a fallback.** `Device.withDefaultDevice(.cpu)` is ~185× slower
+  *and computes different audio* — 48,000 samples against 85,800 for the same sentence.
+  Losing Metal would change how the app sounds, not merely its speed.
+- **"Synthesis is a pure function of (phonemes, voice)" is false.** Kokoro's decoder draws
+  Gaussian noise from MLX's global RNG, so repeat calls differ byte-wise. Nothing
+  accumulates, so statelessness holds, but output is not deterministic without seeding.
+
+**Could not be constrained, and was not faked:** thread count — mlx-swift 0.30.2 exposes no
+such control, and `VECLIB_MAXIMUM_THREADS` at 1/2/4/8 changed nothing (62.6 s across the
+board). The plan's "4 threads" and "2 threads" rows are therefore not implemented. What was
+measurable instead:
+
+| configuration | TTFA |
+|---|---|
+| unconstrained | 0.359 s |
+| no buffer cache | 0.482 s |
+| 512 MB MLX ceiling | 0.399 s |
+| 256 MB + no cache | 0.734 s |
+
+Even the pessimistic floor beats today's HTTP server by 2.7×.
+
+---
+
+## Phase 4 — Let the provider set the chunk size, and bound MLX's memory
 
 The 150-character cap exists *only* as a workaround for the PyTorch-MPS truncation bug. Native has no such limit, and a smaller first chunk means faster first sound.
 
@@ -176,7 +273,17 @@ The 150-character cap exists *only* as a workaround for the PyTorch-MPS truncati
 
 Re-tune the native first-chunk size against measured time-to-first-sound rather than guessing.
 
-**Done when:** the HTTP provider still gets 150, the native provider gets its own measured value, and a test pins that the session honours the provider.
+**Also in this phase, from Phase 3b's findings:** set an **MLX memory ceiling**. Peak
+memory is currently unbounded and reaches 1.7 GB at a 100-character chunk — fine on a 64 GB
+machine, uncomfortable on an 8 GB Air with a browser open. The envelope suite measured a
+512 MB ceiling costing only +11% latency (0.399 s vs 0.359 s), which is a good trade for
+bounding memory on exactly the machines we said we cared about.
+
+Note also that `Segmenter.Options.firstChunkCap` (already 100) is what actually governs
+time-to-first-sound; `recommendedCharacterCap` can only lower it.
+
+**Done when:** the HTTP provider still gets 150, the native provider gets its own measured
+value, a test pins that the session honours the provider, and peak memory is bounded.
 
 ---
 
@@ -198,7 +305,26 @@ Open: whether **MLX fp16** is acoustically clean. The fp16 regression measured i
 came through ONNX and may be a conversion artifact. If MLX fp16 holds up, the model halves
 to ~160 MB and bundle size stops being a question. Measure it in Phase 3.
 
-## Phase 5 — Bundle everything, and keep the build honest
+## Phase 5 — Bundle everything, and keep the build honest ✅ *(done 2026-09-18)*
+
+**Result: 217 MB assembled, 176 MB zipped** — against the ~362 MB the spike estimated and
+the ~210 MB working estimate. fp16 weights 156 MB, 46 voices 23 MB, lexicon and Kokoro
+config 8 MB, binary 26 MB, metallib 3 MB.
+
+A prebuilt `.metallib` does work: the project stays on SPM, no `xcodebuild`, and the
+largest durability risk in this plan is closed. `build-app.sh` builds it on demand when
+`.build/release/mlx.metallib` is absent and signs it before the bundle (codesign treats a
+metallib as nested code).
+
+Assets resolve through `Bundle`, never through a source-tree path. Verified by copying the
+signed `.app` outside the repository, moving `Models/` and the `.build` resource bundles
+aside, and running `MOXSPEAK_SELFTEST=1` — it loaded the bundled weights, voice, lexicon
+and metallib and synthesized 5.92 s of real audio (peak 0.396 of full scale). Removing any
+one of the three bundled asset groups makes it fail, so the check is not vacuous.
+Details in `.superpowers/phase5-report.md`.
+
+The app *links* the native engine here; Phase 6 makes it *drive* it.
+
 
 - Model weights, lexicon and voice data ship **inside the `.app`**. No Application Support directory, no download on first run, works offline.
 - `build-app.sh` assembles and signs with the Developer ID identity (already done — grants survive rebuilds).
@@ -214,34 +340,118 @@ to ~160 MB and bundle size stops being a question. Measure it in Phase 3.
 
 ---
 
-## Phase 6 — Native becomes the default, server stays selectable
+## Phase 6 — Native becomes the default, server stays selectable ✅ *(done 2026-09-18)*
 
-- Engine choice in the menu, persisted alongside voice and speed.
-- Native is the default; the HTTP provider remains for pointing at a remote or a beefier engine.
-- Engine switching takes effect without a restart.
+**Property 1 and property 2 are now true through the real app.** Kokoro stopped, `build/`
+launched directly: `app: started on the native engine`, 46 voices, warmed up in 1.23 s, and
+⌥⇧S spoke. **Median time to first sound 0.323 s** over 8 runs with unique text (0.281 –
+0.345), against ~1.95 s for the HTTP path. 285 tests.
 
-**Done when:** a fresh launch with no server running speaks correctly, and switching to the HTTP engine still works when one is available.
+Engine choice lives in the menu beside Voice and Speed, is persisted under the `engine`
+key, and switches without a restart — `AppController` replaces an `EngineRuntime`
+(provider *and* session together) rather than mutating either. That pairing is the whole
+mechanism: `SpeechSession` reads `recommendedCharacterCap` and `requiresTextNormalization`
+exactly once, at construction, so a session that outlived an engine change would keep
+chunking and normalizing for the engine it no longer talks to. The switch writes both
+numbers to the log, observed live:
+
+    engine: switched to http — Kokoro server on 127.0.0.1:8880; chunk cap 150 characters, text normalization off
+    engine: switched to native — Built in — no server needed; chunk cap 100 characters, text normalization on
+
+**The 72-to-46 migration, exercised rather than reasoned about.** Stored `ef_dora`
+(Spanish, one of the 26 the bundle does not ship), switched to native:
+
+    settings: stored voice ef_dora is not among the 46 voices the native engine offers —
+    speaking as af_bella this session; ef_dora stays saved and returns on an engine that has it
+
+…and switching back restored it (`stored voice ef_dora is available on the http engine —
+restored`). That round trip needed a fix: `loadVoices` re-resolved from the voice *in use*
+rather than from the stored preference, so the first fallback would have been permanent
+for the session even after switching back to an engine that had the voice. Resolving from
+`settings.storedVoice` is what makes the existing "not written back" comment true.
+
+Also per-engine now, because one number was wrong for one of them: `EngineHealth`'s slow
+threshold (native 1.25 s, HTTP 2.5 s) and its advice — there is no server to restart when
+the engine is this process.
+
+Details, including the unreachable-server transcript, in `.superpowers/phase6-report.md`.
 
 ---
 
-## Phase 7 — Clean uninstall
+## Phase 7 — Clean uninstall ✅ *(done 2026-09-18)*
 
-Preferences and the log are the only things outside the bundle. Add a menu item that clears both, so removing MoxSpeak leaves nothing behind. Document what it touches.
+**"Reset MoxSpeak…"**, beside Quit, behind a confirmation. It empties the preferences
+domain and deletes `~/Library/Logs/MoxSpeak.log` — the only two things MoxSpeak leaves
+outside its own bundle, because everything the engine needs ships inside the `.app`. 299
+tests.
 
-**Done when:** the item empties the defaults domain and the log, and the app returns to first-launch behaviour.
+Measured on a copy of the bundle given its own identifier, so nothing else could write
+into the domain while it was watched: afterwards `defaults read` answers *does not exist*,
+the log is gone, and **42 bytes** survive — an empty `{}` plist that `cfprefsd` owns and
+keeps. That is the floor for any macOS app that has ever stored a preference.
+
+**The log had to be silenced, not merely deleted.** `applicationWillTerminate` writes
+`terminate`, so a log deleted while logging was still on would reappear the moment the user
+quit — a file left behind on a machine they had just been told was clean.
+`AppLog.stopLogging()` runs *before* the delete and stays in force for the rest of the
+launch. Confirmed live: the reset app spoke, quit, and appended nothing.
+
+**Honest about the one thing it cannot do.** The Accessibility approval behind
+select-to-speak belongs to macOS's TCC database, keyed to the app's signing identity, and
+is not revocable by the app it was granted to. The confirmation names it and says who
+removes it (System Settings → Privacy & Security → Accessibility) rather than implying a
+clean slate. A test pins that wording, so it cannot quietly drift into a promise we
+cannot keep.
+
+Also verified live, driving the running build by pid: **Cancel touches nothing** (it logs
+`reset: the user cancelled — nothing was touched`), and the running app returns to
+first-launch behaviour without a restart — HTTP/`am_michael`/1.25× became Built
+in/`af_bella`/1×, 46 voices, in the same process.
+
+**Done when:** the item empties the defaults domain and the log, and the app returns to
+first-launch behaviour. ✅
 
 ---
 
-## Phase 8 — End-to-end verification
+## Phase 8 — End-to-end verification ✅ *(done 2026-09-18)*
 
-Against the four properties, with numbers:
+All five properties hold. Full record, written for a person, in
+`.superpowers/phase8-verification.md`. 299 tests, zero warnings.
 
-1. **Self-contained:** stop Kokoro entirely, confirm the app still speaks.
-2. **Fast:** time to first sound, unique text per run, median of at least 6. Target under 0.5s.
-3. **Stateless:** 200 consecutive syntheses; report time-to-first-sound for the first and last ten, and resident memory across the run. Both should be flat.
-4. **Durable:** a written record of every pinned version and vendored component.
+| property | headline |
+|---|---|
+| 1. Self-contained | Kokoro killed; app spoke. **0 sockets, 0 child processes, 0 python mappings.** |
+| 2. Fast | **median 0.336 s** over 12 varied unique-text runs (0.238–0.369); slowest of 24 runs 0.369 s against a 0.5 s budget |
+| 3. Stateless | 200 utterances: RSS **361.2 → 362.3 MB (+1.1 MB)**; last-ten TTFA median 0.197 s vs first-ten 0.345 s — **run 200 is 0.57× run 1** |
+| 4. Durable | inventory written: pins, vendored commits, asset hashes, clean-checkout build in 3 commands / 98 s |
+| 5. macOS versions | floor **14.0 verified four ways** and by the compiler (zero `@available` anywhere); **macOS 26 still untested on hardware** |
 
-Plus a quality spot-check: the normalizer's corpus through the full native path, confirming numbers, currency and dates sound right.
+**Property 1's accidental control, again.** One ⌥⇧S reached both builds: the native one
+logged `first sound after 0.386s`, the installed HTTP one logged `Could not connect to the
+server` in the same second.
+
+**Property 3 is the one that mattered.** The old engine leaked ~28 MB per request — 5.6 GB
+over 200. Measured slope here: **+6.5 KB per utterance**, 0.02% of a 363 MB process, which
+is allocator noise. Zero timeouts, zero failures, 25,910 characters in 34 minutes.
+
+**Reported rather than smoothed over:** around runs 102–115 time-to-first-sound stepped
+down from ~0.35 s to ~0.197 s and stayed there. A step, not a drift, and not thermal — the
+machine had been inferring continuously for 30 minutes and got *better*. Cause unproven
+(power state, or Metal's function cache finishing its warm-up). It moves in the safe
+direction, but the honest reading of "run 200 is as fast as run 1" is "faster, for a reason
+nobody has pinned down".
+
+**Re-verified after `rm -rf .build`:** Core builds with **0 Cmlx object files**, 0
+`import MLX`, 0 undefined mlx symbols; `swift test` × 3 → 299/299/299; 299 with `Models/`
+absent; 299 with real inference; `build-app.sh` from clean → 98 s, signed, valid. Bundle
+**217.7 MiB (228 MB), 171.6 MiB (179.9 MB) zipped**. HTTP engine with a server up: 72
+voices, first sound 0.451 s.
+
+**Quality spot-check found three real defects**, all normalizer-side and all unowned:
+`2:04:36` keeps its colons into the phoneme string (H:MM:SS is unhandled), `5:45pm` loses
+the space and becomes "fivepeem", `9am` is not expanded at all, and `Mon.-Fri.` drops the
+range. Currency, dates, percent, units, decimals, version numbers and phone digits are all
+correct.
 
 ---
 
@@ -253,4 +463,56 @@ The HUD with its scrub bar, sentence-level navigation, memory spill-to-disk, and
 
 - **MLX / `xcodebuild`** — the main durability threat. Phase 2 is designed to avoid it if the measurement allows.
 - **Heteronyms** — "read" past vs present comes from POS tagging, which normalization cannot fix. Two of 28 in the spike. Accepted; revisit if it grates in use.
-- **Carbon hotkeys** are long-deprecated but are the only no-permission global hotkey API. Accepted, with the migration path being `CGEventTap` plus an Accessibility prompt if Apple ever removes it.
+- **Carbon hotkeys** are long-deprecated but are the only no-permission global hotkey API.
+  Accepted, with the migration path being `CGEventTap` plus an Accessibility prompt if Apple
+  ever removes it — at the cost of the no-permission property. **Unverified on macOS 26;
+  test before relying on it further.**
+- **Notarization.** Developer ID signing alone is not enough to run on another Mac:
+  `spctl` reports `rejected — source=Unnotarized Developer ID`, so a copied build needs
+  right-click-Open or the quarantine attribute cleared. Notarization becomes necessary if
+  this is ever shared publicly.
+
+---
+
+## Boxed for later
+
+Deferred deliberately, not forgotten.
+
+**Notarization.** Developer ID signing alone does not clear Gatekeeper on another Mac.
+macOS 15+ removed the right-click-Open bypass, so an unnotarized build gets a dead-end
+"could not verify … Move to Trash" dialog — confirmed on the macOS 26 machine.
+
+Required before sharing publicly; every downloader hits the same wall. One-time setup, and
+the credential step needs the owner because it uses his Apple ID:
+
+```bash
+xcrun notarytool store-credentials "moxspeak-notary" \
+  --apple-id "<apple-id>" --team-id 9F9SXNU23N
+```
+
+(app-specific password from appleid.apple.com → Sign-In and Security). After that,
+`build-app.sh` gains a submit-and-staple step and the problem is gone permanently.
+
+Immediate workaround meanwhile: `xattr -dr com.apple.quarantine <path>`, or System Settings
+→ Privacy & Security → Open Anyway.
+
+**Verifying macOS 26.** Unresolved and still the sharpest open risk: whether Carbon
+`RegisterEventHotKey` still works there. It is the only global-hotkey API needing no
+Accessibility permission, and it has been deprecated for a decade. Blocked behind
+notarization, since the app would not launch on that machine.
+
+Also unverified there: SF Symbol availability for the gem, media keys, and AX selection
+reading.
+
+**Note:** the work Mac gets much easier once the native engine lands — the awkwardness today
+is that it would need Kokoro-FastAPI installed. Native removes that entirely; the machine
+needs nothing but the app.
+
+**URL and email normalization.** Phase 1's known gap, still unowned. The worst remaining
+MisakiSwift failure, and relevant because web articles are a primary use case.
+
+**The normalizer defects Phase 8's spot-check found.** `2:04:36` (H:MM:SS) keeps its colons
+all the way into the phoneme string; `5:45pm` loses the space before the meridiem and is
+pronounced "fivepeem"; `9am` is not expanded at all; `Mon.-Fri.` becomes "Monday Friday"
+with the range dropped. Same class as the URL gap above, same lack of an owner. Durations,
+race times and opening hours are not exotic text.
