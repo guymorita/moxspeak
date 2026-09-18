@@ -63,16 +63,19 @@ final class AppController {
 
     func start() {
         let menuBar = MenuBarController(actions: .init(
-            speakClipboard: { [weak self] in self?.speakClipboard() },
+            speak: { [weak self] in self?.speakText() },
             togglePause: { [weak self] in self?.togglePause() },
             stop: { [weak self] in self?.stop() },
             selectVoice: { [weak self] in self?.selectVoice($0) },
             selectRate: { [weak self] in self?.selectRate($0) },
+            enableSelectToSpeak: { [weak self] in self?.enableSelectToSpeak() },
+            menuWillOpen: { [weak self] in self?.refreshSelectToSpeak() },
             quit: { NSApplication.shared.terminate(nil) }
         ))
         self.menuBar = menuBar
         menuBar.setVoices([], selected: voice, note: "Loading voices…")
         menuBar.setSelectedRate(rate)
+        refreshSelectToSpeak()
 
         installHotkeys()
 
@@ -91,7 +94,7 @@ final class AppController {
     private func installHotkeys() {
         var problems: [String] = []
         do {
-            try hotkeys.register(.optionShiftS) { [weak self] in self?.speakClipboard() }
+            try hotkeys.register(.optionShiftS) { [weak self] in self?.speakText() }
         } catch {
             problems.append("\(error)")
         }
@@ -152,16 +155,32 @@ final class AppController {
 
     // MARK: - Commands
 
-    func speakClipboard() {
-        guard let text = NSPasteboard.general.string(forType: .string),
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            // Non-modal, self-clearing, and it says which of the two things happened
-            // (nothing copied vs. something copied that is not text).
-            menuBar?.flash("Clipboard is empty")
-            idleNote = "Nothing to speak — the clipboard has no text"
+    /// ⌥⇧S. Reads the selection when the user has granted Accessibility, the clipboard
+    /// when they have not — and the clipboard anyway when there is a permission but no
+    /// selection to read.
+    ///
+    /// Which of those happened is written to the log every single time. A user who
+    /// believes they are using select-to-speak and is silently on the clipboard path
+    /// will hear the *wrong text*, which is a failure that announces itself as a
+    /// success. That is precisely the class of bug this project refuses to ship.
+    func speakText() {
+        let reading = SelectionReader.read()
+
+        // Trust is re-read on every press rather than cached at launch, because it is
+        // not ours to cache: the user can grant or revoke it in System Settings while
+        // this process runs, and macOS does not tell us when they do.
+        menuBar?.setSelectToSpeak(active: reading.isTrusted)
+
+        AppLog.write("speak: source=\(reading.source.rawValue) — \(reading.reason)")
+
+        guard let text = reading.text else {
+            // Non-modal, self-clearing, and it says which of the things happened —
+            // nothing copied, something copied that is not text, or nothing selected.
+            menuBar?.flash(reading.emptyFlash)
+            idleNote = "Nothing to speak — \(reading.emptyNote)"
             lastError = nil
             refresh()
-            AppLog.write("speak: nothing to say — the clipboard holds no text")
+            AppLog.write("speak: nothing to say — \(reading.emptyNote)")
             return
         }
         speak(text)
@@ -241,6 +260,27 @@ final class AppController {
         engine?.rate = value
         menuBar?.setSelectedRate(value)
         refresh()
+    }
+
+    // MARK: - Select-to-speak
+
+    /// Called when the menu is about to open, so the item is never showing a permission
+    /// state the user changed five minutes ago in System Settings.
+    private func refreshSelectToSpeak() {
+        menuBar?.setSelectToSpeak(active: SelectionReader.isTrusted)
+    }
+
+    /// The *only* place in this app that can raise a system permission dialog, and it is
+    /// reachable only by the user clicking a menu item that says so. Nothing on the
+    /// launch path, the hotkey path or the speak path calls it.
+    private func enableSelectToSpeak() {
+        AppLog.write("select-to-speak: user asked to enable it; prompting for Accessibility")
+        SelectionReader.requestPermission()
+        menuBar?.flash("Approve MoxSpeak in System Settings → Privacy", seconds: 5)
+
+        // The grant lands whenever the user gets round to it, and macOS sends no
+        // notification when it does. Nothing here polls: the next menu open re-checks,
+        // and so does the next ⌥⇧S.
     }
 
     // MARK: - Playback

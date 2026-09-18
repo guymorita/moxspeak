@@ -8,7 +8,16 @@
 # NSStatusItem, MPRemoteCommandCenter and NSPasteboard all work without any.
 # Ad-hoc signing (`-s -`) is enough to satisfy Gatekeeper for a locally built app.
 #
-# Idempotent: run it as often as you like.
+# Idempotent: run it as often as you like — with one caveat, printed at the end.
+#
+# The caveat: select-to-speak is optional and needs Accessibility, and an ad-hoc
+# signature has no stable identity for macOS to pin an approval to, so TCC pins
+# the code hash instead. Every rebuild changes that hash, which silently voids
+# the approval: System Settings goes on showing MoxSpeak ticked while
+# AXIsProcessTrusted() returns false and ⌥⇧S quietly reads the clipboard. That
+# is precisely the kind of looks-fine-isn't failure this project exists to
+# avoid, so the script says so out loud rather than leaving it to be
+# rediscovered.
 
 set -euo pipefail
 
@@ -76,3 +85,13 @@ echo
 echo "Built: $(cd "${BUILD_DIR}" && pwd)/${APP_NAME}.app"
 echo "Run it:  open -a \"$(cd "${BUILD_DIR}" && pwd)/${APP_NAME}.app\""
 echo "Logs:    ~/Library/Logs/MoxSpeak.log"
+echo
+echo "Note: this rebuild changed the app's code hash, which voids any existing"
+echo "      Accessibility approval — System Settings will still show MoxSpeak"
+echo "      ticked, but select-to-speak will be off and ⌥⇧S will read the"
+echo "      clipboard. If you had it enabled, re-approve it:"
+echo
+echo "        tccutil reset Accessibility ${BUNDLE_ID}"
+echo
+echo "      then click \"Enable Select-to-Speak…\" in the menu and approve."
+echo "      Nothing else in the app is affected; it needs no permissions."

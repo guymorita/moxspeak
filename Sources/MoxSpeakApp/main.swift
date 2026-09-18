@@ -22,13 +22,20 @@ final class MoxSpeakAppDelegate: NSObject, NSApplicationDelegate {
     private var controller: AppController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Logged every launch as a standing invariant, not as a diagnostic: this app is
-        // built so that this stays false forever. Carbon hotkeys, NSStatusItem,
-        // MPRemoteCommandCenter and NSPasteboard all work untrusted. If it ever reads
-        // true, something has been added that asks the user for a permission this app
-        // was designed never to need.
+        // Logged every launch as a standing invariant, not as a diagnostic. The app's
+        // whole feature set — Carbon hotkeys, NSStatusItem, MPRemoteCommandCenter,
+        // NSPasteboard — works untrusted, and false is the expected reading.
+        //
+        // Select-to-speak is the single exception, and it is an *upgrade*: true here
+        // means the user went to System Settings and granted it deliberately, never that
+        // the app asked. `AXIsProcessTrusted()` only reports; the one call that can raise
+        // the system dialog lives behind a menu item (see `SelectionReader`) and nothing
+        // on this path goes near it. If this reads true on a machine where nobody granted
+        // anything, something has started asking for a permission this app must not need.
+        let trusted = AXIsProcessTrusted()
         AppLog.write("launch: pid \(ProcessInfo.processInfo.processIdentifier), "
-                     + "AXIsProcessTrusted=\(AXIsProcessTrusted())")
+                     + "AXIsProcessTrusted=\(trusted) — select-to-speak "
+                     + (trusted ? "available" : "off, reading the clipboard"))
         let controller = AppController(port: Self.port)
         self.controller = controller
         controller.start()

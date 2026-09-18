@@ -22,11 +22,16 @@ final class MenuBarController: NSObject {
     /// Everything the menu can ask for. Closures rather than a delegate protocol: there
     /// is exactly one implementer and the call sites read better inline.
     struct Actions {
-        var speakClipboard: @MainActor () -> Void
+        var speak: @MainActor () -> Void
         var togglePause: @MainActor () -> Void
         var stop: @MainActor () -> Void
         var selectVoice: @MainActor (String) -> Void
         var selectRate: @MainActor (Float) -> Void
+        var enableSelectToSpeak: @MainActor () -> Void
+        /// Fired every time the menu is about to appear. The controller uses it to
+        /// re-read state that can change behind the app's back — Accessibility, which
+        /// the user can grant or revoke in System Settings at any moment.
+        var menuWillOpen: @MainActor () -> Void
         var quit: @MainActor () -> Void
     }
 
@@ -47,6 +52,7 @@ final class MenuBarController: NSObject {
     private let rateItem = NSMenuItem()
     private let engineItem = NSMenuItem()
     private let warningItem = NSMenuItem()
+    private let selectToSpeakItem = NSMenuItem()
 
     /// Guards the transient flash message: a later flash must not be wiped by an earlier
     /// one's expiry.
@@ -58,6 +64,7 @@ final class MenuBarController: NSObject {
         super.init()
 
         buildMenu()
+        menu.delegate = self
         statusItem.menu = menu
         setIcon(.idle)
 
@@ -87,7 +94,7 @@ final class MenuBarController: NSObject {
         // Carbon hotkey fires too, so ⌥⇧Space would toggle pause twice and appear to do
         // nothing. The title tells the user what the key is without wiring a second path
         // to the same action.
-        configure(speakItem, title: "Speak Clipboard  (⌥⇧S)", action: #selector(speakClipboard))
+        configure(speakItem, title: "Speak Clipboard  (⌥⇧S)", action: #selector(speak))
         configure(pauseItem, title: "Pause  (⌥⇧Space)", action: #selector(togglePause))
         configure(stopItem, title: "Stop  (⌥⇧.)", action: #selector(stop))
 
@@ -100,6 +107,14 @@ final class MenuBarController: NSObject {
         rateItem.title = "Speed"
         rateItem.submenu = buildRateMenu()
         menu.addItem(rateItem)
+
+        menu.addItem(.separator())
+
+        // Titled and enabled by `setSelectToSpeak`, which the controller calls before
+        // the menu opens. It is never left in whatever state it was in ten minutes ago.
+        selectToSpeakItem.target = self
+        menu.addItem(selectToSpeakItem)
+        setSelectToSpeak(active: false)
 
         menu.addItem(.separator())
 
@@ -237,6 +252,34 @@ final class MenuBarController: NSObject {
         }
     }
 
+    /// Shows — and offers — the state of select-to-speak.
+    ///
+    /// Worded from the user's side. "Enable Select-to-Speak…" says what they get; the
+    /// ellipsis says a system dialog is coming. Nothing here mentions Accessibility
+    /// APIs, trusted processes or `AXUIElement`, because none of that is the user's
+    /// problem. The ⌥⇧S item is retitled to match, so the menu never claims to read the
+    /// clipboard while it is actually reading the selection, or the reverse.
+    func setSelectToSpeak(active: Bool) {
+        if active {
+            selectToSpeakItem.title = "Select-to-Speak is on"
+            selectToSpeakItem.toolTip = "⌥⇧S reads whatever is selected. "
+                                      + "If nothing is selected, it reads the clipboard."
+            selectToSpeakItem.state = .on
+            selectToSpeakItem.action = nil
+            selectToSpeakItem.isEnabled = false
+            speakItem.title = "Speak Selection  (⌥⇧S)"
+        } else {
+            selectToSpeakItem.title = "Enable Select-to-Speak…"
+            selectToSpeakItem.toolTip = "Let MoxSpeak read text you have selected, "
+                                      + "instead of text you have copied. "
+                                      + "macOS will ask you to approve this."
+            selectToSpeakItem.state = .off
+            selectToSpeakItem.action = #selector(enableSelectToSpeak)
+            selectToSpeakItem.isEnabled = true
+            speakItem.title = "Speak Clipboard  (⌥⇧S)"
+        }
+    }
+
     func setSelectedRate(_ rate: Float) {
         for item in rateItem.submenu?.items ?? [] {
             item.state = ((item.representedObject as? NSNumber)?.floatValue == rate) ? .on : .off
@@ -263,7 +306,8 @@ final class MenuBarController: NSObject {
 
     // MARK: - Menu actions
 
-    @objc private func speakClipboard() { actions.speakClipboard() }
+    @objc private func speak() { actions.speak() }
+    @objc private func enableSelectToSpeak() { actions.enableSelectToSpeak() }
     @objc private func togglePause() { actions.togglePause() }
     @objc private func stop() { actions.stop() }
     @objc private func quit() { actions.quit() }
@@ -276,5 +320,17 @@ final class MenuBarController: NSObject {
     @objc private func selectRate(_ sender: NSMenuItem) {
         guard let rate = (sender.representedObject as? NSNumber)?.floatValue else { return }
         actions.selectRate(rate)
+    }
+}
+
+// MARK: - Menu delegate
+
+extension MenuBarController: NSMenuDelegate {
+
+    /// Permission state is not ours to cache — the user can change it in System Settings
+    /// while this menu sits idle in the menu bar. Re-asking at the moment the menu opens
+    /// is cheap and is the only way the item can be right.
+    func menuWillOpen(_ menu: NSMenu) {
+        actions.menuWillOpen()
     }
 }
