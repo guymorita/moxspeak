@@ -29,6 +29,21 @@ private let article = String(
     }
 }
 
+/// The duration estimate that truncation validation depends on (`isAcceptable`, in
+/// SpeechSession) is only valid when synthesis actually runs at 1.0 — a session that
+/// requested any other speed would silently defeat that safety net (see
+/// `SpeechSession.synthesisSpeed`'s doc comment). `FakeProvider` ignores whatever speed
+/// it's given, so nothing else here would catch a regression; this asserts on
+/// `lastSpeed` directly, which is the only thing that would.
+@Test func sessionAlwaysRequestsSynthesisSpeedOfOne() async {
+    let fake = FakeProvider()
+    let session = makeSession(provider: fake)
+    _ = await session.speak("A short sentence for a speed check.", voice: "v")
+    await session.waitForRenderComplete()
+
+    #expect(await fake.lastSpeed == 1.0)
+}
+
 @Test func advancesGenerationOnEachSpeak() async {
     let session = makeSession(provider: FakeProvider())
     let first = await session.speak("Hello there.", voice: "v")

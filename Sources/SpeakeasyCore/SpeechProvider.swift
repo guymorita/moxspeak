@@ -54,6 +54,12 @@ public actor FakeProvider: SpeechProvider {
     public private(set) var callCount = 0
     public private(set) var cancelledCount = 0
     public private(set) var lastText: String?
+    /// The `speed` argument most recently passed to `synthesize`. Nil until the first
+    /// call. Exists so tests can assert on the speed the session actually requests —
+    /// without it, `synthesize`'s `speed` parameter is accepted and silently ignored,
+    /// and a session that regressed to requesting the wrong speed would still pass
+    /// every test.
+    public private(set) var lastSpeed: Double?
 
     public init() {}
 
@@ -67,6 +73,7 @@ public actor FakeProvider: SpeechProvider {
     public func synthesize(text: String, voice: String, speed: Double) async throws -> Data {
         callCount += 1
         lastText = text
+        lastSpeed = speed
 
         switch behavior {
         case .failing(let error):
