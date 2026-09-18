@@ -34,7 +34,12 @@ let package = Package(
         .target(name: "MoxSpeakCore"),
 
         .executableTarget(name: "moxspeak", dependencies: ["MoxSpeakCore"]),
-        .executableTarget(name: "MoxSpeakApp", dependencies: ["MoxSpeakCore"]),
+        // Depends on the native engine so the shipped `.app` *contains* a speech engine —
+        // weights, voices, lexicon and metallib all inside the bundle. It does not yet
+        // *use* it: `AppController` still drives `OpenAICompatibleProvider`. Linking and
+        // switching are deliberately separate steps (plan Phase 5 vs Phase 6) so a
+        // packaging problem and a behaviour change cannot be confused for each other.
+        .executableTarget(name: "MoxSpeakApp", dependencies: ["MoxSpeakCore", "MoxSpeakNative"]),
 
         // Text -> 24 kHz mono 16-bit PCM, entirely in-process. Depends on Core; Core
         // does not depend on it.

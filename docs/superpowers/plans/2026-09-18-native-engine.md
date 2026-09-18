@@ -305,7 +305,26 @@ Open: whether **MLX fp16** is acoustically clean. The fp16 regression measured i
 came through ONNX and may be a conversion artifact. If MLX fp16 holds up, the model halves
 to ~160 MB and bundle size stops being a question. Measure it in Phase 3.
 
-## Phase 5 — Bundle everything, and keep the build honest
+## Phase 5 — Bundle everything, and keep the build honest ✅ *(done 2026-09-18)*
+
+**Result: 217 MB assembled, 176 MB zipped** — against the ~362 MB the spike estimated and
+the ~210 MB working estimate. fp16 weights 156 MB, 46 voices 23 MB, lexicon and Kokoro
+config 8 MB, binary 26 MB, metallib 3 MB.
+
+A prebuilt `.metallib` does work: the project stays on SPM, no `xcodebuild`, and the
+largest durability risk in this plan is closed. `build-app.sh` builds it on demand when
+`.build/release/mlx.metallib` is absent and signs it before the bundle (codesign treats a
+metallib as nested code).
+
+Assets resolve through `Bundle`, never through a source-tree path. Verified by copying the
+signed `.app` outside the repository, moving `Models/` and the `.build` resource bundles
+aside, and running `MOXSPEAK_SELFTEST=1` — it loaded the bundled weights, voice, lexicon
+and metallib and synthesized 5.92 s of real audio (peak 0.396 of full scale). Removing any
+one of the three bundled asset groups makes it fail, so the check is not vacuous.
+Details in `.superpowers/phase5-report.md`.
+
+The app *links* the native engine now; it still *drives* the HTTP one. Switching is Phase 6.
+
 
 - Model weights, lexicon and voice data ship **inside the `.app`**. No Application Support directory, no download on first run, works offline.
 - `build-app.sh` assembles and signs with the Developer ID identity (already done — grants survive rebuilds).
