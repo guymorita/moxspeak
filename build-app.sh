@@ -176,8 +176,21 @@ SIGN_ID="$(security find-identity -v -p codesigning 2>/dev/null \
 NESTED=("${APP}/Contents/MacOS/mlx.metallib")
 
 if [ -n "${SIGN_ID}" ]; then
-    codesign -s "${SIGN_ID}" --force --options runtime --timestamp=none "${NESTED[@]}"
-    codesign -s "${SIGN_ID}" --force --options runtime --timestamp=none "${APP}"
+    if [ -n "${MOXSPEAK_NO_TIMESTAMP:-}" ]; then
+        codesign -s "${SIGN_ID}" --force --options runtime --timestamp=none "${NESTED[@]}"
+    else
+        codesign -s "${SIGN_ID}" --force --options runtime --timestamp "${NESTED[@]}"
+    fi
+    # A secure timestamp is required for notarization — Apple rejects unstamped
+    # signatures outright. It needs network access to Apple's timestamp server,
+    # so MOXSPEAK_NO_TIMESTAMP=1 is available for offline builds that will never
+    # be notarized.
+    if [ -n "${MOXSPEAK_NO_TIMESTAMP:-}" ]; then
+        codesign -s "${SIGN_ID}" --force --options runtime --timestamp=none "${APP}"
+        echo "    signed WITHOUT a timestamp — this build cannot be notarized"
+    else
+        codesign -s "${SIGN_ID}" --force --options runtime --timestamp "${APP}"
+    fi
     echo "    signed with Developer ID ${SIGN_ID} — Accessibility grants survive rebuilds"
 else
     codesign -s - --force "${NESTED[@]}"
