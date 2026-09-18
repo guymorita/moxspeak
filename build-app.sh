@@ -6,7 +6,17 @@
 # Apple Developer account, no entitlements file and no provisioning profile
 # anywhere in this, because the app asks for no permissions: Carbon hotkeys,
 # NSStatusItem, MPRemoteCommandCenter and NSPasteboard all work without any.
-# Ad-hoc signing (`-s -`) is enough to satisfy Gatekeeper for a locally built app.
+# Signing identity matters more than it looks, because of how macOS pins permissions.
+#
+# Ad-hoc signing (`-s -`) has no stable identity, so TCC pins an Accessibility grant to
+# the binary's *code hash*. Every rebuild changes that hash and silently voids the grant:
+# System Settings still shows the app ticked, the TCC database still says "allowed", and
+# AXIsProcessTrusted() correctly returns false. Nothing reports an error; select-to-speak
+# just quietly stops working.
+#
+# A Developer ID identity gives macOS something stable to pin to, so grants survive
+# rebuilds and future updates. We use it when it is present and fall back to ad-hoc when
+# it is not, so the build still works on a machine without the certificate.
 #
 # Idempotent: run it as often as you like — with one caveat, printed at the end.
 #
@@ -77,8 +87,18 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-echo "==> ad-hoc signing"
-codesign -s - --force "${APP}"
+echo "==> signing"
+SIGN_ID="$(security find-identity -v -p codesigning 2>/dev/null \
+    | grep "Developer ID Application" | head -1 | awk '{print $2}')"
+if [ -n "${SIGN_ID}" ]; then
+    codesign -s "${SIGN_ID}" --force --options runtime --timestamp=none "${APP}"
+    echo "    signed with Developer ID ${SIGN_ID} — Accessibility grants survive rebuilds"
+else
+    codesign -s - --force "${APP}"
+    echo "    ad-hoc signed (no Developer ID found)"
+    echo "    NOTE: this rebuild voided any Accessibility grant. To re-grant:"
+    echo "          tccutil reset Accessibility com.moxspeak.menubar"
+fi
 codesign --verify --verbose=1 "${APP}" 2>&1 | sed 's/^/    /'
 
 echo
