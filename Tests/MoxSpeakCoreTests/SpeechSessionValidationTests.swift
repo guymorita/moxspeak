@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 private func session(_ provider: some SpeechProvider) -> SpeechSession {
     SpeechSession(provider: provider,

@@ -1,9 +1,9 @@
-# Speakeasy — System-Wide Text-to-Speech for macOS
+# MoxSpeak — System-Wide Text-to-Speech for macOS
 
 **Date:** 2026-09-17
 **Status:** Approved design, revised after external review and measurement. Ready for
 implementation planning.
-**Working name:** Speakeasy (placeholder)
+**Working name:** MoxSpeak (placeholder)
 
 ## Problem
 
@@ -201,7 +201,7 @@ Owns the lifecycle of the local Kokoro engine so the user never does.
 
 - **First run:** a one-time "Setting up voices…" progress screen. Creates a private uv
   virtual environment and installs Kokoro-FastAPI and its model weights under
-  `~/Library/Application Support/Speakeasy/`. Requires network, costs a few minutes and
+  `~/Library/Application Support/MoxSpeak/`. Requires network, costs a few minutes and
   roughly 3–5GB of disk (PyTorch dominates this).
 - **Every run after:** starts the server as a hidden child process on **its own private
   port**, health-checks it, restarts it on crash, stops it on quit.

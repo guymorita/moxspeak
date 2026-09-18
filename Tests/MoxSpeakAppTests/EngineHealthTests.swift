@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import SpeakeasyApp
+@testable import MoxSpeakApp
 
 // EngineHealth is the one part of the app that is pure logic rather than AppKit, so it is
 // the one part that can be tested honestly. Everything asserted here is asserted on the

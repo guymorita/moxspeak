@@ -1,7 +1,7 @@
 import Testing
 import Foundation
-import SpeakeasyCore
-@testable import SpeakeasyApp
+import MoxSpeakCore
+@testable import MoxSpeakApp
 
 // The other pure-logic corner of the app: turning a failure into the sentence the menu
 // shows. Worth pinning because it is the place the project's central principle actually

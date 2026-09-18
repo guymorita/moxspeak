@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 private func makeSegmenter(cap: Int = 150, firstCap: Int = 100) -> Segmenter {
     var o = Segmenter.Options()

@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 @Test func kokoroFormatHasExpectedByteRate() {
     let f = AudioFormat.kokoroPCM

@@ -1,5 +1,5 @@
 import AppKit
-import SpeakeasyCore
+import MoxSpeakCore
 
 /// The status item, its icon, and its menu. Owns no speech state — everything it shows
 /// is pushed in by `AppController`, and everything the user clicks goes back out through
@@ -106,7 +106,7 @@ final class MenuBarController: NSObject {
 
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: "Quit Speakeasy", action: #selector(quit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit MoxSpeak", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
     }
@@ -148,16 +148,16 @@ final class MenuBarController: NSObject {
         switch state {
         case .idle:
             symbol = "speaker.wave.2"
-            description = "Speakeasy: idle"
+            description = "MoxSpeak: idle"
         case .speaking:
             symbol = "speaker.wave.2.fill"
-            description = "Speakeasy: speaking"
+            description = "MoxSpeak: speaking"
         case .paused:
             symbol = "pause.fill"
-            description = "Speakeasy: paused"
+            description = "MoxSpeak: paused"
         case .error:
             symbol = "exclamationmark.triangle"
-            description = "Speakeasy: something went wrong"
+            description = "MoxSpeak: something went wrong"
         }
 
         if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: description) {

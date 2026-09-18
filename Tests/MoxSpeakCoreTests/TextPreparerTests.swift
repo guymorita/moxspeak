@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 @Test func stripsMarkdownEmphasisAndHeadings() {
     let p = TextPreparer()

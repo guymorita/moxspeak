@@ -1,14 +1,14 @@
-# Speakeasy Speech Core Implementation Plan
+# MoxSpeak Speech Core Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the headless speech pipeline — raw text in, audio out of the speakers — driven by a CLI, with no AppKit, no Accessibility permissions, and no UI.
 
-**Architecture:** A Swift Package Manager library (`SpeakeasyCore`) holding every piece of logic, plus a thin executable target (`speakeasy`) that wires them together. Text flows through `TextPreparer` (de-format) → `Segmenter` (cap at 150 chars) → `SpeechSession` (orchestration, prefetch, validation) → `SpeechProvider` (HTTP) → `PlaybackEngine` (AVAudioEngine). Everything except `PlaybackEngine` is tested against a `FakeProvider` with no network and no audio hardware.
+**Architecture:** A Swift Package Manager library (`MoxSpeakCore`) holding every piece of logic, plus a thin executable target (`moxspeak`) that wires them together. Text flows through `TextPreparer` (de-format) → `Segmenter` (cap at 150 chars) → `SpeechSession` (orchestration, prefetch, validation) → `SpeechProvider` (HTTP) → `PlaybackEngine` (AVAudioEngine). Everything except `PlaybackEngine` is tested against a `FakeProvider` with no network and no audio hardware.
 
 **Tech Stack:** Swift 6.0.2, swift-tools-version 6.0, macOS 14 target, Swift Testing (`import Testing`), AVFoundation, URLSession. No third-party dependencies.
 
-**Spec:** `docs/superpowers/specs/2026-09-17-speakeasy-tts-design.md`
+**Spec:** `docs/superpowers/specs/2026-09-17-moxspeak-tts-design.md`
 
 ## Global Constraints
 
@@ -28,16 +28,16 @@
 | File | Responsibility |
 |---|---|
 | `Package.swift` | Package definition, two targets plus tests |
-| `Sources/SpeakeasyCore/Models.swift` | `AudioFormat`, `Chunk`, `ChunkState`, `Voice`, `SpeechError` |
-| `Sources/SpeakeasyCore/DurationEstimator.swift` | Characters ↔ seconds ↔ PCM bytes |
-| `Sources/SpeakeasyCore/TextPreparer.swift` | Markdown/PDF/emoji de-formatting |
-| `Sources/SpeakeasyCore/Segmenter.swift` | Sentence splitting and capped chunk packing |
-| `Sources/SpeakeasyCore/SpeechProvider.swift` | Provider protocol and `FakeProvider` |
-| `Sources/SpeakeasyCore/OpenAICompatibleProvider.swift` | Real HTTP provider |
-| `Sources/SpeakeasyCore/SpeechSession.swift` | Orchestration, generations, prefetch, validation |
-| `Sources/SpeakeasyCore/PlaybackEngine.swift` | AVAudioEngine playback |
-| `Sources/speakeasy/main.swift` | CLI entry point |
-| `Tests/SpeakeasyCoreTests/*.swift` | One test file per source file |
+| `Sources/MoxSpeakCore/Models.swift` | `AudioFormat`, `Chunk`, `ChunkState`, `Voice`, `SpeechError` |
+| `Sources/MoxSpeakCore/DurationEstimator.swift` | Characters ↔ seconds ↔ PCM bytes |
+| `Sources/MoxSpeakCore/TextPreparer.swift` | Markdown/PDF/emoji de-formatting |
+| `Sources/MoxSpeakCore/Segmenter.swift` | Sentence splitting and capped chunk packing |
+| `Sources/MoxSpeakCore/SpeechProvider.swift` | Provider protocol and `FakeProvider` |
+| `Sources/MoxSpeakCore/OpenAICompatibleProvider.swift` | Real HTTP provider |
+| `Sources/MoxSpeakCore/SpeechSession.swift` | Orchestration, generations, prefetch, validation |
+| `Sources/MoxSpeakCore/PlaybackEngine.swift` | AVAudioEngine playback |
+| `Sources/moxspeak/main.swift` | CLI entry point |
+| `Tests/MoxSpeakCoreTests/*.swift` | One test file per source file |
 
 ---
 
@@ -45,8 +45,8 @@
 
 **Files:**
 - Create: `Package.swift`
-- Create: `Sources/SpeakeasyCore/Models.swift`
-- Create: `Tests/SpeakeasyCoreTests/ModelsTests.swift`
+- Create: `Sources/MoxSpeakCore/Models.swift`
+- Create: `Tests/MoxSpeakCoreTests/ModelsTests.swift`
 
 **Interfaces:**
 - Consumes: nothing
@@ -55,8 +55,8 @@
 - [ ] **Step 1: Create the package layout**
 
 ```bash
-cd /Users/guymorita/Dev/speakeasy
-mkdir -p Sources/SpeakeasyCore Sources/speakeasy Tests/SpeakeasyCoreTests
+cd /Users/guymorita/Dev/moxspeak
+mkdir -p Sources/MoxSpeakCore Sources/moxspeak Tests/MoxSpeakCoreTests
 ```
 
 - [ ] **Step 2: Write `Package.swift`**
@@ -66,28 +66,28 @@ mkdir -p Sources/SpeakeasyCore Sources/speakeasy Tests/SpeakeasyCoreTests
 import PackageDescription
 
 let package = Package(
-    name: "Speakeasy",
+    name: "MoxSpeak",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "SpeakeasyCore", targets: ["SpeakeasyCore"]),
-        .executable(name: "speakeasy", targets: ["speakeasy"]),
+        .library(name: "MoxSpeakCore", targets: ["MoxSpeakCore"]),
+        .executable(name: "moxspeak", targets: ["moxspeak"]),
     ],
     targets: [
-        .target(name: "SpeakeasyCore"),
-        .executableTarget(name: "speakeasy", dependencies: ["SpeakeasyCore"]),
-        .testTarget(name: "SpeakeasyCoreTests", dependencies: ["SpeakeasyCore"]),
+        .target(name: "MoxSpeakCore"),
+        .executableTarget(name: "moxspeak", dependencies: ["MoxSpeakCore"]),
+        .testTarget(name: "MoxSpeakCoreTests", dependencies: ["MoxSpeakCore"]),
     ]
 )
 ```
 
 - [ ] **Step 3: Write the failing test**
 
-Create `Tests/SpeakeasyCoreTests/ModelsTests.swift`:
+Create `Tests/MoxSpeakCoreTests/ModelsTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 @Test func kokoroFormatHasExpectedByteRate() {
     let f = AudioFormat.kokoroPCM
@@ -112,7 +112,7 @@ import Foundation
 Run: `swift test 2>&1 | tail -20`
 Expected: FAIL — compile error, `cannot find 'AudioFormat' in scope`.
 
-- [ ] **Step 5: Write `Sources/SpeakeasyCore/Models.swift`**
+- [ ] **Step 5: Write `Sources/MoxSpeakCore/Models.swift`**
 
 ```swift
 import Foundation
@@ -189,7 +189,7 @@ Expected: PASS — 2 tests.
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/guymorita/Dev/speakeasy
+cd /Users/guymorita/Dev/moxspeak
 git add Package.swift Sources Tests
 git commit -m "feat(core): package scaffold and core model types"
 ```
@@ -199,8 +199,8 @@ git commit -m "feat(core): package scaffold and core model types"
 ### Task 2: DurationEstimator
 
 **Files:**
-- Create: `Sources/SpeakeasyCore/DurationEstimator.swift`
-- Create: `Tests/SpeakeasyCoreTests/DurationEstimatorTests.swift`
+- Create: `Sources/MoxSpeakCore/DurationEstimator.swift`
+- Create: `Tests/MoxSpeakCoreTests/DurationEstimatorTests.swift`
 
 **Interfaces:**
 - Consumes: `AudioFormat` (Task 1)
@@ -212,12 +212,12 @@ git commit -m "feat(core): package scaffold and core model types"
 
 - [ ] **Step 1: Write the failing test**
 
-Create `Tests/SpeakeasyCoreTests/DurationEstimatorTests.swift`:
+Create `Tests/MoxSpeakCoreTests/DurationEstimatorTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 @Test func estimatesFromCharacterCount() {
     let e = DurationEstimator()
@@ -253,7 +253,7 @@ Expected: FAIL — `cannot find 'DurationEstimator' in scope`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `Sources/SpeakeasyCore/DurationEstimator.swift`:
+Create `Sources/MoxSpeakCore/DurationEstimator.swift`:
 
 ```swift
 import Foundation
@@ -295,7 +295,7 @@ Expected: PASS — 4 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/SpeakeasyCore/DurationEstimator.swift Tests/SpeakeasyCoreTests/DurationEstimatorTests.swift
+git add Sources/MoxSpeakCore/DurationEstimator.swift Tests/MoxSpeakCoreTests/DurationEstimatorTests.swift
 git commit -m "feat(core): duration estimator with measured chars-per-second constant"
 ```
 
@@ -306,8 +306,8 @@ git commit -m "feat(core): duration estimator with measured chars-per-second con
 Covers only what Kokoro's normalizer does not: document formatting. Do not add number, date, currency, URL, or abbreviation handling — the backend already does those, and duplicating them causes double-normalization bugs.
 
 **Files:**
-- Create: `Sources/SpeakeasyCore/TextPreparer.swift`
-- Create: `Tests/SpeakeasyCoreTests/TextPreparerTests.swift`
+- Create: `Sources/MoxSpeakCore/TextPreparer.swift`
+- Create: `Tests/MoxSpeakCoreTests/TextPreparerTests.swift`
 
 **Interfaces:**
 - Consumes: nothing
@@ -319,12 +319,12 @@ Covers only what Kokoro's normalizer does not: document formatting. Do not add n
 
 - [ ] **Step 1: Write the failing test**
 
-Create `Tests/SpeakeasyCoreTests/TextPreparerTests.swift`:
+Create `Tests/MoxSpeakCoreTests/TextPreparerTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 @Test func stripsMarkdownEmphasisAndHeadings() {
     let p = TextPreparer()
@@ -413,7 +413,7 @@ Expected: FAIL — `cannot find 'TextPreparer' in scope`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `Sources/SpeakeasyCore/TextPreparer.swift`:
+Create `Sources/MoxSpeakCore/TextPreparer.swift`:
 
 ```swift
 import Foundation
@@ -555,7 +555,7 @@ Expected: PASS — 13 tests. If the emoji or whitespace tests fail on spacing, a
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/SpeakeasyCore/TextPreparer.swift Tests/SpeakeasyCoreTests/TextPreparerTests.swift
+git add Sources/MoxSpeakCore/TextPreparer.swift Tests/MoxSpeakCoreTests/TextPreparerTests.swift
 git commit -m "feat(core): text preparer for markdown, PDF wraps, citations and emoji"
 ```
 
@@ -564,8 +564,8 @@ git commit -m "feat(core): text preparer for markdown, PDF wraps, citations and 
 ### Task 4: Segmenter
 
 **Files:**
-- Create: `Sources/SpeakeasyCore/Segmenter.swift`
-- Create: `Tests/SpeakeasyCoreTests/SegmenterTests.swift`
+- Create: `Sources/MoxSpeakCore/Segmenter.swift`
+- Create: `Tests/MoxSpeakCoreTests/SegmenterTests.swift`
 
 **Interfaces:**
 - Consumes: `Chunk` (Task 1), `DurationEstimator` (Task 2)
@@ -576,12 +576,12 @@ git commit -m "feat(core): text preparer for markdown, PDF wraps, citations and 
 
 - [ ] **Step 1: Write the failing test**
 
-Create `Tests/SpeakeasyCoreTests/SegmenterTests.swift`:
+Create `Tests/MoxSpeakCoreTests/SegmenterTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 private func makeSegmenter(cap: Int = 150, firstCap: Int = 100) -> Segmenter {
     var o = Segmenter.Options()
@@ -685,7 +685,7 @@ Expected: FAIL — `cannot find 'Segmenter' in scope`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `Sources/SpeakeasyCore/Segmenter.swift`:
+Create `Sources/MoxSpeakCore/Segmenter.swift`:
 
 ```swift
 import Foundation
@@ -842,7 +842,7 @@ Expected: PASS — 10 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/SpeakeasyCore/Segmenter.swift Tests/SpeakeasyCoreTests/SegmenterTests.swift
+git add Sources/MoxSpeakCore/Segmenter.swift Tests/MoxSpeakCoreTests/SegmenterTests.swift
 git commit -m "feat(core): segmenter with hard character cap and clause/word splitting"
 ```
 
@@ -851,8 +851,8 @@ git commit -m "feat(core): segmenter with hard character cap and clause/word spl
 ### Task 5: SpeechProvider protocol and FakeProvider
 
 **Files:**
-- Create: `Sources/SpeakeasyCore/SpeechProvider.swift`
-- Create: `Tests/SpeakeasyCoreTests/FakeProviderTests.swift`
+- Create: `Sources/MoxSpeakCore/SpeechProvider.swift`
+- Create: `Tests/MoxSpeakCoreTests/FakeProviderTests.swift`
 
 **Interfaces:**
 - Consumes: `AudioFormat`, `Voice`, `SpeechError` (Task 1), `DurationEstimator` (Task 2)
@@ -862,12 +862,12 @@ git commit -m "feat(core): segmenter with hard character cap and clause/word spl
 
 - [ ] **Step 1: Write the failing test**
 
-Create `Tests/SpeakeasyCoreTests/FakeProviderTests.swift`:
+Create `Tests/MoxSpeakCoreTests/FakeProviderTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 @Test func fakeProducesAudioProportionalToText() async throws {
     let fake = FakeProvider()
@@ -925,7 +925,7 @@ Expected: FAIL — `cannot find 'FakeProvider' in scope`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `Sources/SpeakeasyCore/SpeechProvider.swift`:
+Create `Sources/MoxSpeakCore/SpeechProvider.swift`:
 
 ```swift
 import Foundation
@@ -1030,7 +1030,7 @@ Expected: PASS — 6 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/SpeakeasyCore/SpeechProvider.swift Tests/SpeakeasyCoreTests/FakeProviderTests.swift
+git add Sources/MoxSpeakCore/SpeechProvider.swift Tests/MoxSpeakCoreTests/FakeProviderTests.swift
 git commit -m "feat(core): speech provider protocol and configurable fake provider"
 ```
 
@@ -1039,8 +1039,8 @@ git commit -m "feat(core): speech provider protocol and configurable fake provid
 ### Task 6: OpenAICompatibleProvider
 
 **Files:**
-- Create: `Sources/SpeakeasyCore/OpenAICompatibleProvider.swift`
-- Create: `Tests/SpeakeasyCoreTests/OpenAICompatibleProviderTests.swift`
+- Create: `Sources/MoxSpeakCore/OpenAICompatibleProvider.swift`
+- Create: `Tests/MoxSpeakCoreTests/OpenAICompatibleProviderTests.swift`
 
 **Interfaces:**
 - Consumes: `SpeechProvider` (Task 5), `AudioFormat`, `Voice`, `SpeechError` (Task 1)
@@ -1053,12 +1053,12 @@ git commit -m "feat(core): speech provider protocol and configurable fake provid
 
 These tests use a stub `URLProtocol` so no network is touched.
 
-Create `Tests/SpeakeasyCoreTests/OpenAICompatibleProviderTests.swift`:
+Create `Tests/MoxSpeakCoreTests/OpenAICompatibleProviderTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 // MARK: - URLProtocol stub
 
@@ -1203,7 +1203,7 @@ Expected: FAIL — `cannot find 'OpenAICompatibleProvider' in scope`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `Sources/SpeakeasyCore/OpenAICompatibleProvider.swift`:
+Create `Sources/MoxSpeakCore/OpenAICompatibleProvider.swift`:
 
 ```swift
 import Foundation
@@ -1343,7 +1343,7 @@ Expected: PASS — 6 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/SpeakeasyCore/OpenAICompatibleProvider.swift Tests/SpeakeasyCoreTests/OpenAICompatibleProviderTests.swift
+git add Sources/MoxSpeakCore/OpenAICompatibleProvider.swift Tests/MoxSpeakCoreTests/OpenAICompatibleProviderTests.swift
 git commit -m "feat(core): OpenAI-compatible provider with identity probe"
 ```
 
@@ -1352,8 +1352,8 @@ git commit -m "feat(core): OpenAI-compatible provider with identity probe"
 ### Task 7: SpeechSession — generations and prefetch
 
 **Files:**
-- Create: `Sources/SpeakeasyCore/SpeechSession.swift`
-- Create: `Tests/SpeakeasyCoreTests/SpeechSessionTests.swift`
+- Create: `Sources/MoxSpeakCore/SpeechSession.swift`
+- Create: `Tests/MoxSpeakCoreTests/SpeechSessionTests.swift`
 
 **Interfaces:**
 - Consumes: everything from Tasks 1–5
@@ -1367,12 +1367,12 @@ git commit -m "feat(core): OpenAI-compatible provider with identity probe"
 
 - [ ] **Step 1: Write the failing test**
 
-Create `Tests/SpeakeasyCoreTests/SpeechSessionTests.swift`:
+Create `Tests/MoxSpeakCoreTests/SpeechSessionTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 private func makeSession(provider: some SpeechProvider,
                          policy: SpeechSession.ValidationPolicy = .init()) -> SpeechSession {
@@ -1460,7 +1460,7 @@ Expected: FAIL — `cannot find 'SpeechSession' in scope`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `Sources/SpeakeasyCore/SpeechSession.swift`:
+Create `Sources/MoxSpeakCore/SpeechSession.swift`:
 
 ```swift
 import Foundation
@@ -1588,7 +1588,7 @@ Expected: PASS — 6 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/SpeakeasyCore/SpeechSession.swift Tests/SpeakeasyCoreTests/SpeechSessionTests.swift
+git add Sources/MoxSpeakCore/SpeechSession.swift Tests/MoxSpeakCoreTests/SpeechSessionTests.swift
 git commit -m "feat(core): speech session with generation tokens and continuous prefetch"
 ```
 
@@ -1600,8 +1600,8 @@ This is the task that makes the backend's silent-truncation bug visible. Without
 short or empty response presents to the user as "it just stopped reading."
 
 **Files:**
-- Modify: `Sources/SpeakeasyCore/SpeechSession.swift` (replace `synthesizeValidated`)
-- Create: `Tests/SpeakeasyCoreTests/SpeechSessionValidationTests.swift`
+- Modify: `Sources/MoxSpeakCore/SpeechSession.swift` (replace `synthesizeValidated`)
+- Create: `Tests/MoxSpeakCoreTests/SpeechSessionValidationTests.swift`
 
 **Interfaces:**
 - Consumes: `SpeechSession` (Task 7), `FakeProvider.Behavior` (Task 5)
@@ -1609,12 +1609,12 @@ short or empty response presents to the user as "it just stopped reading."
 
 - [ ] **Step 1: Write the failing test**
 
-Create `Tests/SpeakeasyCoreTests/SpeechSessionValidationTests.swift`:
+Create `Tests/MoxSpeakCoreTests/SpeechSessionValidationTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 private func session(_ provider: some SpeechProvider) -> SpeechSession {
     SpeechSession(provider: provider,
@@ -1728,7 +1728,7 @@ private func session(_ provider: some SpeechProvider) -> SpeechSession {
 Run: `swift test --filter SpeechSessionValidation 2>&1 | tail -30`
 Expected: FAIL — empty and short audio are currently accepted, so the `.failed` expectations fail.
 
-- [ ] **Step 3: Replace `synthesizeValidated` in `Sources/SpeakeasyCore/SpeechSession.swift`**
+- [ ] **Step 3: Replace `synthesizeValidated` in `Sources/MoxSpeakCore/SpeechSession.swift`**
 
 Delete the `fileprivate func synthesizeValidated` stub from Task 7 and put this in its place:
 
@@ -1802,7 +1802,7 @@ Expected: PASS — all tests from Tasks 1–8.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/SpeakeasyCore/SpeechSession.swift Tests/SpeakeasyCoreTests/SpeechSessionValidationTests.swift
+git add Sources/MoxSpeakCore/SpeechSession.swift Tests/MoxSpeakCoreTests/SpeechSessionValidationTests.swift
 git commit -m "feat(core): per-chunk audio validation with retry-then-split recovery"
 ```
 
@@ -1810,15 +1810,15 @@ git commit -m "feat(core): per-chunk audio validation with retry-then-split reco
 
 ### Task 9: PlaybackEngine and CLI
 
-Deliverable: `speakeasy speak "some text"` produces sound from the speakers.
+Deliverable: `moxspeak speak "some text"` produces sound from the speakers.
 
 `PlaybackEngine` is deliberately thin because it cannot be honestly unit-tested — it
 needs real audio hardware. Its tests cover only buffer conversion, which is pure.
 
 **Files:**
-- Create: `Sources/SpeakeasyCore/PlaybackEngine.swift`
-- Create: `Sources/speakeasy/main.swift`
-- Create: `Tests/SpeakeasyCoreTests/PlaybackEngineTests.swift`
+- Create: `Sources/MoxSpeakCore/PlaybackEngine.swift`
+- Create: `Sources/moxspeak/main.swift`
+- Create: `Tests/MoxSpeakCoreTests/PlaybackEngineTests.swift`
 
 **Interfaces:**
 - Consumes: `AudioFormat` (Task 1), `SpeechSession` (Tasks 7–8)
@@ -1828,13 +1828,13 @@ needs real audio hardware. Its tests cover only buffer conversion, which is pure
 
 - [ ] **Step 1: Write the failing test**
 
-Create `Tests/SpeakeasyCoreTests/PlaybackEngineTests.swift`:
+Create `Tests/MoxSpeakCoreTests/PlaybackEngineTests.swift`:
 
 ```swift
 import Testing
 import Foundation
 import AVFoundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 @Test func convertsRawPCMBytesToABuffer() throws {
     // One second of silence: 48000 bytes at 24kHz 16-bit mono.
@@ -1872,7 +1872,7 @@ import AVFoundation
 Run: `swift test --filter PlaybackEngine 2>&1 | tail -20`
 Expected: FAIL — `cannot find 'PlaybackEngine' in scope`.
 
-- [ ] **Step 3: Write `Sources/SpeakeasyCore/PlaybackEngine.swift`**
+- [ ] **Step 3: Write `Sources/MoxSpeakCore/PlaybackEngine.swift`**
 
 ```swift
 import Foundation
@@ -1972,21 +1972,21 @@ public final class PlaybackEngine: @unchecked Sendable {
 Run: `swift test --filter PlaybackEngine 2>&1 | tail -20`
 Expected: PASS — 4 tests.
 
-- [ ] **Step 5: Write the CLI at `Sources/speakeasy/main.swift`**
+- [ ] **Step 5: Write the CLI at `Sources/moxspeak/main.swift`**
 
 ```swift
 import Foundation
-import SpeakeasyCore
+import MoxSpeakCore
 
 // Usage:
-//   speakeasy speak "some text"          reads the argument
-//   speakeasy speak -                    reads stdin
+//   moxspeak speak "some text"          reads the argument
+//   moxspeak speak -                    reads stdin
 //   Options: --voice <id> --speed <x> --port <n> --voices
 
 func failUsage() -> Never {
     FileHandle.standardError.write(Data("""
-    usage: speakeasy speak <text|-> [--voice af_bella] [--speed 1.0] [--port 8880]
-           speakeasy voices [--port 8880]
+    usage: moxspeak speak <text|-> [--voice af_bella] [--speed 1.0] [--port 8880]
+           moxspeak voices [--port 8880]
 
     """.utf8))
     exit(2)
@@ -2080,7 +2080,7 @@ default:
 - [ ] **Step 6: Build and verify the whole suite passes**
 
 ```bash
-cd /Users/guymorita/Dev/speakeasy
+cd /Users/guymorita/Dev/moxspeak
 swift build 2>&1 | tail -20
 swift test 2>&1 | tail -20
 ```
@@ -2091,8 +2091,8 @@ Expected: build succeeds, all tests pass.
 The local Kokoro-FastAPI must be running on the given port.
 
 ```bash
-swift run speakeasy voices --port 8880 | head -5
-swift run speakeasy speak "It was a bright cold day in April, and the clocks were striking thirteen."
+swift run moxspeak voices --port 8880 | head -5
+swift run moxspeak speak "It was a bright cold day in April, and the clocks were striking thirteen."
 ```
 Expected: voices list prints; the sentence is spoken aloud; `time to first sound: NNNms` appears on stderr and is in the 600–1500ms range from the spec.
 
@@ -2101,7 +2101,7 @@ Expected: voices list prints; the sentence is spoken aloud; `time to first sound
 ```bash
 # Well over the reliable range for a single request, but the segmenter caps chunks
 # at 150 chars, so this should speak completely rather than cutting off.
-swift run speakeasy speak "$(head -c 2000 /usr/share/dict/words | tr '\n' ' ')" 2>&1 | tail -5
+swift run moxspeak speak "$(head -c 2000 /usr/share/dict/words | tr '\n' ' ')" 2>&1 | tail -5
 ```
 Expected: plays to completion. Any chunk the backend truncates is reported on stderr as
 `chunk N failed:` rather than silently dropped. Zero such lines is the good outcome; the
@@ -2110,8 +2110,8 @@ point is that failures are visible either way.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add Sources/SpeakeasyCore/PlaybackEngine.swift Sources/speakeasy/main.swift Tests/SpeakeasyCoreTests/PlaybackEngineTests.swift
-git commit -m "feat(core): playback engine and speakeasy CLI"
+git add Sources/MoxSpeakCore/PlaybackEngine.swift Sources/moxspeak/main.swift Tests/MoxSpeakCoreTests/PlaybackEngineTests.swift
+git commit -m "feat(core): playback engine and moxspeak CLI"
 ```
 
 ---
@@ -2119,7 +2119,7 @@ git commit -m "feat(core): playback engine and speakeasy CLI"
 ## Done criteria for this plan
 
 - `swift test` passes with all tests from Tasks 1–9.
-- `swift run speakeasy speak "..."` speaks the text through the speakers.
+- `swift run moxspeak speak "..."` speaks the text through the speakers.
 - Time to first sound is reported and falls in the spec's 600–1500ms range.
 - A chunk the backend truncates or drops is reported on stderr, never silently skipped.
 - No AppKit, no Accessibility permission, no UI, no Xcode project.

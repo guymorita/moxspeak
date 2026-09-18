@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import AVFoundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 @Test func convertsRawPCMBytesToABuffer() throws {
     // One second of silence: 48000 bytes at 24kHz 16-bit mono.

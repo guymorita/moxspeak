@@ -1,6 +1,6 @@
 import Foundation
 
-/// Append-only diagnostic log at `~/Library/Logs/Speakeasy.log`.
+/// Append-only diagnostic log at `~/Library/Logs/MoxSpeak.log`.
 ///
 /// An `LSUIElement` app launched by LaunchServices has no terminal attached: stderr goes
 /// nowhere a person can see it. Without a file, every startup problem — a hotkey another
@@ -17,7 +17,7 @@ enum AppLog {
                                                       in: .userDomainMask,
                                                       appropriateFor: nil,
                                                       create: false) else { return nil }
-        return logs.appending(path: "Logs/Speakeasy.log")
+        return logs.appending(path: "Logs/MoxSpeak.log")
     }()
 
     /// Truncate above this so an app left running for weeks cannot fill a disk.

@@ -56,7 +56,7 @@ final class NowPlayingController {
     func beginPlaying(title: String, rate: Float) {
         infoCenter.nowPlayingInfo = [
             MPMediaItemPropertyTitle: title,
-            MPMediaItemPropertyArtist: "Speakeasy",
+            MPMediaItemPropertyArtist: "MoxSpeak",
             MPNowPlayingInfoPropertyPlaybackRate: NSNumber(value: rate),
             MPNowPlayingInfoPropertyIsLiveStream: NSNumber(value: true),
         ]

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Assembles Speakeasy.app from the release build.
+# Assembles MoxSpeak.app from the release build.
 #
 # The bundle is deliberately minimal — a binary and an Info.plist. There is no
 # Apple Developer account, no entitlements file and no provisioning profile
@@ -14,16 +14,16 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-APP_NAME="Speakeasy"
-BUNDLE_ID="com.speakeasy.menubar"
+APP_NAME="MoxSpeak"
+BUNDLE_ID="com.moxspeak.menubar"
 VERSION="0.1.0"
 BUILD_DIR="build"
 APP="${BUILD_DIR}/${APP_NAME}.app"
 
 echo "==> swift build -c release"
-swift build -c release --product SpeakeasyApp
+swift build -c release --product MoxSpeakApp
 
-BINARY="$(swift build -c release --product SpeakeasyApp --show-bin-path)/SpeakeasyApp"
+BINARY="$(swift build -c release --product MoxSpeakApp --show-bin-path)/MoxSpeakApp"
 if [[ ! -x "${BINARY}" ]]; then
   echo "error: release binary not found at ${BINARY}" >&2
   exit 1
@@ -75,4 +75,4 @@ codesign --verify --verbose=1 "${APP}" 2>&1 | sed 's/^/    /'
 echo
 echo "Built: $(cd "${BUILD_DIR}" && pwd)/${APP_NAME}.app"
 echo "Run it:  open -a \"$(cd "${BUILD_DIR}" && pwd)/${APP_NAME}.app\""
-echo "Logs:    ~/Library/Logs/Speakeasy.log"
+echo "Logs:    ~/Library/Logs/MoxSpeak.log"

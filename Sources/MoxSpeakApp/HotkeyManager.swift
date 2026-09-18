@@ -11,7 +11,7 @@ import Carbon.HIToolbox
 /// callback and comparing against it — two copies of one constant, in two places, where
 /// the only symptom of them drifting apart is a hotkey that silently never fires. One
 /// constant, visible to both, removes that failure mode by construction.
-private let speakeasyHotkeySignature: OSType = 0x53_50_4B_59  // 'SPKY'
+private let moxspeakHotkeySignature: OSType = 0x53_50_4B_59  // 'SPKY'
 
 /// Global hotkeys, via Carbon's `RegisterEventHotKey`.
 ///
@@ -117,7 +117,7 @@ final class HotkeyManager {
         let id = nextID
         nextID += 1
 
-        let hotKeyID = EventHotKeyID(signature: speakeasyHotkeySignature, id: id)
+        let hotKeyID = EventHotKeyID(signature: moxspeakHotkeySignature, id: id)
         var reference: EventHotKeyRef?
         let status = RegisterEventHotKey(shortcut.keyCode,
                                          shortcut.modifiers,
@@ -142,7 +142,7 @@ final class HotkeyManager {
                                  eventKind: UInt32(kEventHotKeyPressed))
         var reference: EventHandlerRef?
         let status = InstallEventHandler(GetApplicationEventTarget(),
-                                         speakeasyHotkeyHandler,
+                                         moxspeakHotkeyHandler,
                                          1,
                                          &spec,
                                          Unmanaged.passUnretained(self).toOpaque(),
@@ -178,7 +178,7 @@ final class HotkeyManager {
 /// loop, so this genuinely runs on the main thread; `assumeIsolated` states that rather
 /// than hopping, which would turn a keypress into a queued task and lose the ordering
 /// guarantee against menu actions.
-private func speakeasyHotkeyHandler(_ callRef: EventHandlerCallRef?,
+private func moxspeakHotkeyHandler(_ callRef: EventHandlerCallRef?,
                                     _ event: EventRef?,
                                     _ userData: UnsafeMutableRawPointer?) -> OSStatus {
     guard let event, let userData else {
@@ -202,7 +202,7 @@ private func speakeasyHotkeyHandler(_ callRef: EventHandlerCallRef?,
     // A different signature is somebody else's hotkey arriving on the shared application
     // event target. Declining it is correct and routine, so it stays quiet — this is the
     // one silent exit on this path, and it is silent because it is not a failure.
-    guard hotKeyID.signature == speakeasyHotkeySignature else {
+    guard hotKeyID.signature == moxspeakHotkeySignature else {
         return OSStatus(eventNotHandledErr)
     }
 

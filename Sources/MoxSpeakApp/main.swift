@@ -9,12 +9,12 @@ import ApplicationServices
 /// the policy here as well covers running the binary directly out of `.build` during
 /// development, where there is no Info.plist at all.
 @MainActor
-final class SpeakeasyAppDelegate: NSObject, NSApplicationDelegate {
+final class MoxSpeakAppDelegate: NSObject, NSApplicationDelegate {
 
     /// The port the local engine is expected on. Overridable because the engine is not
     /// managed by this app — someone else started it, possibly somewhere else.
     private static var port: Int {
-        guard let raw = ProcessInfo.processInfo.environment["SPEAKEASY_PORT"],
+        guard let raw = ProcessInfo.processInfo.environment["MOXSPEAK_PORT"],
               let value = Int(raw) else { return 8880 }
         return value
     }
@@ -43,7 +43,7 @@ let application = NSApplication.shared
 application.setActivationPolicy(.accessory)
 
 // NSApplication holds its delegate weakly; this binding is what keeps it alive.
-let delegate = SpeakeasyAppDelegate()
+let delegate = MoxSpeakAppDelegate()
 application.delegate = delegate
 
 application.run()

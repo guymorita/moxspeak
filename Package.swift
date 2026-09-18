@@ -2,18 +2,18 @@
 import PackageDescription
 
 let package = Package(
-    name: "Speakeasy",
+    name: "MoxSpeak",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "SpeakeasyCore", targets: ["SpeakeasyCore"]),
-        .executable(name: "speakeasy", targets: ["speakeasy"]),
-        .executable(name: "SpeakeasyApp", targets: ["SpeakeasyApp"]),
+        .library(name: "MoxSpeakCore", targets: ["MoxSpeakCore"]),
+        .executable(name: "moxspeak", targets: ["moxspeak"]),
+        .executable(name: "MoxSpeakApp", targets: ["MoxSpeakApp"]),
     ],
     targets: [
-        .target(name: "SpeakeasyCore"),
-        .executableTarget(name: "speakeasy", dependencies: ["SpeakeasyCore"]),
-        .executableTarget(name: "SpeakeasyApp", dependencies: ["SpeakeasyCore"]),
-        .testTarget(name: "SpeakeasyCoreTests", dependencies: ["SpeakeasyCore"]),
-        .testTarget(name: "SpeakeasyAppTests", dependencies: ["SpeakeasyApp"]),
+        .target(name: "MoxSpeakCore"),
+        .executableTarget(name: "moxspeak", dependencies: ["MoxSpeakCore"]),
+        .executableTarget(name: "MoxSpeakApp", dependencies: ["MoxSpeakCore"]),
+        .testTarget(name: "MoxSpeakCoreTests", dependencies: ["MoxSpeakCore"]),
+        .testTarget(name: "MoxSpeakAppTests", dependencies: ["MoxSpeakApp"]),
     ]
 )

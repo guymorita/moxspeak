@@ -1,15 +1,15 @@
 import Foundation
-import SpeakeasyCore
+import MoxSpeakCore
 
 // Usage:
-//   speakeasy speak "some text"          reads the argument
-//   speakeasy speak -                    reads stdin
+//   moxspeak speak "some text"          reads the argument
+//   moxspeak speak -                    reads stdin
 //   Options: --voice <id> --speed <x> --port <n> --voices
 
 func failUsage() -> Never {
     FileHandle.standardError.write(Data("""
-    usage: speakeasy speak <text|-> [--voice af_bella] [--speed 1.0] [--port 8880]
-           speakeasy voices [--port 8880]
+    usage: moxspeak speak <text|-> [--voice af_bella] [--speed 1.0] [--port 8880]
+           moxspeak voices [--port 8880]
 
     """.utf8))
     exit(2)

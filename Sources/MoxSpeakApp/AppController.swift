@@ -1,5 +1,5 @@
 import AppKit
-import SpeakeasyCore
+import MoxSpeakCore
 
 /// The glue: clipboard in, `SpeechSession` in the middle, `PlaybackEngine` out, and every
 /// state change reflected in the menu bar.

@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import SpeakeasyCore
+@testable import MoxSpeakCore
 
 private func makeSession(provider: some SpeechProvider,
                          policy: SpeechSession.ValidationPolicy = .init()) -> SpeechSession {
