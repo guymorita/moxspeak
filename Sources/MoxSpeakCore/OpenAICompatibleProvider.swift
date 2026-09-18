@@ -49,6 +49,15 @@ public struct OpenAICompatibleProvider: SpeechProvider {
     public var supportsIncrementalStreaming: Bool { config.supportsIncrementalStreaming }
     public var recommendedCharacterCap: Int { config.recommendedCharacterCap }
 
+    /// Always false, and not configurable.
+    ///
+    /// Every server behind this shape — Kokoro-FastAPI, OpenAI, Groq — normalizes text on its
+    /// own before phonemizing. Sending it text we have already normalized is not a no-op: the
+    /// server's rules run again over our output and mangle it ("five dollars" picks up a
+    /// second "dollars" from a `$` we already consumed). Normalization belongs to the engine
+    /// that owns the phonemizer, and for this provider that engine is remote.
+    public var requiresTextNormalization: Bool { false }
+
     public func synthesize(text: String, voice: String, speed: Double) async throws -> Data {
         var request = URLRequest(url: config.baseURL.appending(path: "/v1/audio/speech"))
         request.httpMethod = "POST"
