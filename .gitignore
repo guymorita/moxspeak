@@ -9,3 +9,12 @@ DerivedData/
 .superpowers/
 *.swiftdeps~
 *.swiftmodule
+
+# Native engine model assets — hundreds of MB, fetched not committed.
+# Provenance and the re-fetch recipe: Sources/Vendor/VENDORED.md
+Models/
+*.safetensors
+!Sources/Vendor/MisakiSwift/Resources/*.safetensors
+
+# Prebuilt MLX Metal library (see Scripts/build-metallib.sh)
+*.metallib
