@@ -10,9 +10,12 @@ public actor SpeechSession {
 
     public struct ValidationPolicy: Sendable {
         /// Audio shorter than this fraction of the estimate is treated as a failure.
-        /// The backend silently truncates; see the spec's Known Issues.
         public var minimumDurationRatio: Double = 0.6
-        public var maxRetries: Int = 1
+        /// Additional attempts per level, beyond the first. Failures are intermittent,
+        /// so a retry is often enough on its own.
+        public var maxRetries: Int = 2
+        /// How many times a failing chunk may be halved before giving up.
+        public var maxSplitDepth: Int = 2
         public init() {}
     }
 
@@ -127,10 +130,81 @@ public actor SpeechSession {
         }
     }
 
-    /// Overridden in Task 8 to add retry-then-split recovery.
-    fileprivate func synthesizeValidated(chunk: Chunk,
-                                         voice: String,
-                                         speed: Double) async throws -> Data {
-        try await provider.synthesize(text: chunk.text, voice: voice, speed: speed)
+    // MARK: - Validation
+
+    /// Synthesize with output validation.
+    ///
+    /// The backend can return HTTP 200 with truncated or entirely absent audio (see the
+    /// spec's Known Issues). Comparing the returned duration against the character-count
+    /// estimate is the only thing that makes that failure visible.
+    ///
+    /// Recovery is a recursive ladder, not a one-shot "retry once, split once" — measured
+    /// behavior shows failures are intermittent and state-dependent (the same input,
+    /// unchanged in size, succeeds in one run and fails in another), so a piece that fails
+    /// is not necessarily doomed and deserves a full attempt budget at every size it's
+    /// tried at, including after a split. At each level we attempt synthesis up to
+    /// `maxRetries + 1` times; if every attempt at a level fails, the text is halved at a
+    /// word boundary and each half is recursed into independently (with its own full
+    /// attempt budget), up to `maxSplitDepth` levels deep. Halves are concatenated in
+    /// order; only once the depth limit is exhausted does a piece give up, and its
+    /// failure propagates up and fails the whole chunk.
+    private func synthesizeValidated(chunk: Chunk,
+                                     voice: String,
+                                     speed: Double) async throws -> Data {
+        try await synthesizeWithRecovery(text: chunk.text, voice: voice, speed: speed, depth: 0)
+    }
+
+    private func synthesizeWithRecovery(text: String,
+                                        voice: String,
+                                        speed: Double,
+                                        depth: Int) async throws -> Data {
+        var lastData = Data()
+        var attempt = 0
+        while attempt <= validation.maxRetries {
+            try Task.checkCancellation()
+            lastData = try await provider.synthesize(text: text, voice: voice, speed: speed)
+            if isAcceptable(data: lastData, for: text) { return lastData }
+            attempt += 1
+        }
+
+        // Every attempt at this level failed. Smaller inputs sit further inside the
+        // backend's working range, and failures are intermittent, so halving and
+        // recursing — with its own full attempt budget — is a real chance at recovery,
+        // not just a formality.
+        if depth < validation.maxSplitDepth, let halves = splitInHalf(text) {
+            var combined = Data()
+            for piece in halves {
+                try Task.checkCancellation()
+                let data = try await synthesizeWithRecovery(text: piece, voice: voice,
+                                                             speed: speed, depth: depth + 1)
+                combined.append(data)
+            }
+            return combined
+        }
+
+        // Depth exhausted, or too short to split further: give up on this piece.
+        if lastData.isEmpty {
+            throw SpeechError.emptyAudio
+        }
+        throw SpeechError.shortAudio(
+            expected: estimator.estimate(characterCount: text.count),
+            got: estimator.duration(ofBytes: lastData.count, format: provider.outputFormat))
+    }
+
+    private func isAcceptable(data: Data, for text: String) -> Bool {
+        guard !data.isEmpty else { return false }
+        let expected = estimator.estimate(characterCount: text.count)
+        guard expected > 0 else { return true }
+        let got = estimator.duration(ofBytes: data.count, format: provider.outputFormat)
+        return got / expected >= validation.minimumDurationRatio
+    }
+
+    /// Split at the word boundary nearest the middle. Returns nil when too short to split.
+    private func splitInHalf(_ text: String) -> [String]? {
+        let words = text.split(separator: " ").map(String.init)
+        guard words.count >= 4 else { return nil }
+        let middle = words.count / 2
+        return [words[..<middle].joined(separator: " "),
+                words[middle...].joined(separator: " ")]
     }
 }

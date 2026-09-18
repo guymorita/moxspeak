@@ -31,6 +31,9 @@ public actor FakeProvider: SpeechProvider {
         case short(fraction: Double)
         case failing(SpeechError)
         case slow(seconds: Double)
+        /// Fails the first `count` calls with empty audio, then behaves normally.
+        /// Models the real backend, whose failures are intermittent rather than deterministic.
+        case failingFirst(count: Int)
     }
 
     public nonisolated var outputFormat: AudioFormat { .kokoroPCM }
@@ -39,6 +42,7 @@ public actor FakeProvider: SpeechProvider {
 
     private var behavior: Behavior = .normal
     private let estimator = DurationEstimator()
+    private var failingFirstRemaining = 0
 
     public private(set) var callCount = 0
     public private(set) var cancelledCount = 0
@@ -48,6 +52,9 @@ public actor FakeProvider: SpeechProvider {
 
     public func setBehavior(_ behavior: Behavior) {
         self.behavior = behavior
+        if case .failingFirst(let count) = behavior {
+            failingFirstRemaining = count
+        }
     }
 
     public func synthesize(text: String, voice: String, speed: Double) async throws -> Data {
@@ -72,6 +79,13 @@ public actor FakeProvider: SpeechProvider {
 
         case .short(let fraction):
             return audio(forCharacters: text.count, fraction: fraction)
+
+        case .failingFirst:
+            if failingFirstRemaining > 0 {
+                failingFirstRemaining -= 1
+                return Data()
+            }
+            return audio(forCharacters: text.count, fraction: 1.0)
 
         case .normal:
             try Task.checkCancellation()
