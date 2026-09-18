@@ -162,6 +162,26 @@ func withTemporaryDefaults(_ body: (UserDefaults, String) -> Void) {
     defer {
         defaults.removePersistentDomain(forName: name)
         UserDefaults.standard.removeSuite(named: name)
+        removeSuiteFile(named: name)
     }
     body(defaults, name)
+}
+
+/// Deletes the suite's backing plist.
+///
+/// `removePersistentDomain` empties a domain; it does not remove it. What is left in
+/// ~/Library/Preferences is a 42-byte plist containing an empty dictionary, one per suite
+/// per run, and since every suite name carries a fresh UUID they never get reused — a few
+/// hundred full test runs had deposited 1,118 of them on the machine this was found on.
+/// Harmless in size, but the suite is not entitled to leave anything behind in a
+/// developer's home directory, and "tests litter" is the kind of thing that gets noticed
+/// right after the project is shared with somebody.
+///
+/// Silent on failure by design: cfprefsd may not have written the file yet, in which case
+/// there is nothing to clean up and nothing to report.
+private func removeSuiteFile(named name: String) {
+    guard let library = FileManager.default.urls(for: .libraryDirectory,
+                                                 in: .userDomainMask).first else { return }
+    let plist = library.appendingPathComponent("Preferences/\(name).plist")
+    try? FileManager.default.removeItem(at: plist)
 }

@@ -119,7 +119,7 @@ final class MenuBarController: NSObject {
 
         // Shortcuts are written into the titles rather than set as `keyEquivalent`.
         // A key equivalent on a status menu fires while the menu is open — and the global
-        // Carbon hotkey fires too, so ⌥⇧Space would toggle pause twice and appear to do
+        // Carbon hotkey fires too, so ⌃⌥C would toggle pause twice and appear to do
         // nothing. The title tells the user what the key is without wiring a second path
         // to the same action.
         configure(speakItem, title: "Speak Clipboard", action: #selector(speak))

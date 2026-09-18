@@ -101,10 +101,53 @@ import Testing
     }
 }
 
-@Test func theDefaultsKeepTheLettersAndChangeTheModifier() {
+/// The defaults, and the two properties that chose them.
+///
+/// The three labels are asserted so that changing one has to be deliberate. The rest is
+/// the part with teeth: a default has to be a key the left hand can reach while that same
+/// hand is holding ⌃⌥, and it has to stay off the combinations that were measured as
+/// already spoken for. Space and Period were both defaults once, and both were occupied.
+@Test func theDefaultsAreOneHandedAndUncontested() {
     #expect(HotkeyAction.speak.defaultHotkey.label == "⌃⌥S")
-    #expect(HotkeyAction.pause.defaultHotkey.label == "⌃⌥Space")
-    #expect(HotkeyAction.stop.defaultHotkey.label == "⌃⌥.")
+    #expect(HotkeyAction.pause.defaultHotkey.label == "⌃⌥C")
+    #expect(HotkeyAction.stop.defaultHotkey.label == "⌃⌥X")
+
+    // Reachable by the index or middle finger with ⌃ under the pinky and ⌥ under the ring
+    // finger. A, Q and Z are left-hand keys but sit under the pinky, which is occupied.
+    let oneHanded: Set<UInt32> = [
+        UInt32(kVK_ANSI_W), UInt32(kVK_ANSI_E), UInt32(kVK_ANSI_R), UInt32(kVK_ANSI_T),
+        UInt32(kVK_ANSI_S), UInt32(kVK_ANSI_D), UInt32(kVK_ANSI_F), UInt32(kVK_ANSI_G),
+        UInt32(kVK_ANSI_X), UInt32(kVK_ANSI_C), UInt32(kVK_ANSI_V), UInt32(kVK_ANSI_B),
+    ]
+
+    // Measured rather than guessed. Space is Apple's own ⌃⌥ binding — Select Next Input
+    // Source, symbolic hotkey 61 — and the letters are the block Karabiner-Elements was
+    // remapping away from Control on the machine this was checked on, a configuration
+    // common enough among people who care about keyboards to be worth designing around.
+    let taken: Set<UInt32> = [
+        UInt32(kVK_Space), UInt32(kVK_ANSI_Period), UInt32(kVK_ANSI_Comma),
+        UInt32(kVK_ANSI_Semicolon),
+        UInt32(kVK_ANSI_A), UInt32(kVK_ANSI_D), UInt32(kVK_ANSI_E), UInt32(kVK_ANSI_F),
+        UInt32(kVK_ANSI_H), UInt32(kVK_ANSI_I), UInt32(kVK_ANSI_J), UInt32(kVK_ANSI_K),
+        UInt32(kVK_ANSI_L), UInt32(kVK_ANSI_M), UInt32(kVK_ANSI_N), UInt32(kVK_ANSI_P),
+        UInt32(kVK_ANSI_R), UInt32(kVK_ANSI_U), UInt32(kVK_ANSI_W), UInt32(kVK_ANSI_Y),
+    ]
+
+    for action in HotkeyAction.allCases {
+        let hotkey = action.defaultHotkey
+        #expect(oneHanded.contains(hotkey.keyCode),
+                Comment(rawValue: "the default \(action.rawValue) shortcut "
+                                  + "\(hotkey.label) cannot be pressed with one hand"))
+        #expect(!taken.contains(hotkey.keyCode),
+                Comment(rawValue: "the default \(action.rawValue) shortcut "
+                                  + "\(hotkey.label) was measured as already taken"))
+    }
+
+    // Three distinct keys behind one modifier set, so the hand learns one shape.
+    let keys = HotkeyAction.allCases.map(\.defaultHotkey.keyCode)
+    #expect(Set(keys).count == keys.count)
+    #expect(Set(HotkeyAction.allCases.map(\.defaultHotkey.modifiers))
+            == [Hotkey.control | Hotkey.option])
 }
 
 @Test func everyActionHasItsOwnSettingsKey() {

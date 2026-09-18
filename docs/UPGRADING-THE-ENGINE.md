@@ -51,7 +51,7 @@ with these scripts; a candidate engine should be held to the same bars.
 | App coverage | `.superpowers/compatibility-matrix.md` | 92 clean of 98 combinations |
 
 `gen_pytorch.py` regenerates the PyTorch reference audio the acoustic comparison needs.
-`keystrokes/` posts real ⌥⇧S and ⌥⇧. events for driving the installed app.
+`keystrokes/tap.swift speak|pause|stop` posts real ⌃⌥ events for driving the installed app.
 
 ## Traps that cost us real time
 
