@@ -253,6 +253,31 @@ import Foundation
     #expect(pasteboard.string(forType: .string) == nil)
 }
 
+// MARK: - Naming the frontmost app in the log
+
+// The bug report that started this: "source=copy (tier 2) — nothing selected" is true of
+// every app on the machine at once. Without the frontmost app's name and bundle
+// identifier on the line, an ambiguous report cannot be turned into a reproduction —
+// which is exactly what happened with the iTerm2 report this exists to make unnecessary.
+
+@Test func theFrontmostAppIsNamedByNameAndBundleID() {
+    let label = AppController.describeFrontmost(name: "iTerm2",
+                                                 bundleID: "com.googlecode.iterm2")
+    #expect(label == "iTerm2 (com.googlecode.iterm2)")
+}
+
+@Test func aMissingNameOrBundleIDStillProducesAWordedLabelRatherThanACrashOrBlank() {
+    // `NSRunningApplication.localizedName` and `.bundleIdentifier` are both optional —
+    // seen in the wild for some system processes — and the log line must stay readable
+    // rather than embedding a blank or a literal "nil".
+    let noName = AppController.describeFrontmost(name: nil, bundleID: "com.example.app")
+    let noBundleID = AppController.describeFrontmost(name: "Some App", bundleID: nil)
+    let neither = AppController.describeFrontmost(name: nil, bundleID: nil)
+    #expect(!noName.isEmpty && !noName.contains("nil"))
+    #expect(!noBundleID.isEmpty && !noBundleID.contains("nil"))
+    #expect(!neither.isEmpty && !neither.contains("nil"))
+}
+
 @MainActor
 @Test func restoringAnEmptySnapshotLeavesAnEmptyClipboard() {
     // An empty clipboard is a state the user can legitimately be in, and coming back
