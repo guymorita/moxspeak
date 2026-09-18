@@ -145,3 +145,41 @@ private let article = String(
     let chunks = await session.chunks
     #expect(chunks.first?.text == "A heading")
 }
+
+@Test func rendersChunksSequentiallyInOrder() async {
+    // Records how many syntheses are in flight at once, and in what order chunks arrive.
+    actor OrderRecorder: SpeechProvider {
+        nonisolated var outputFormat: AudioFormat { .kokoroPCM }
+        nonisolated var supportsIncrementalStreaming: Bool { true }
+        nonisolated var recommendedCharacterCap: Int { 150 }
+        private let estimator = DurationEstimator()
+        private var inFlight = 0
+        private(set) var maxInFlight = 0
+        private(set) var order: [String] = []
+
+        func synthesize(text: String, voice: String, speed: Double) async throws -> Data {
+            inFlight += 1
+            maxInFlight = max(maxInFlight, inFlight)
+            order.append(String(text.prefix(12)))
+            try? await Task.sleep(for: .milliseconds(20))
+            inFlight -= 1
+            let seconds = estimator.estimate(characterCount: text.count)
+            return Data(count: Int(seconds * Double(outputFormat.bytesPerSecond)))
+        }
+        func listVoices() async throws -> [Voice] { [] }
+    }
+
+    let recorder = OrderRecorder()
+    let s = SpeechSession(provider: recorder, preparer: TextPreparer(),
+                          segmenter: Segmenter(), estimator: DurationEstimator())
+    let text = (1...6).map { "Sentence number \($0) has several words in it here." }.joined(separator: " ")
+    _ = await s.speak(text, voice: "v", speed: 1.0)
+    await s.waitForRenderComplete()
+
+    #expect(await recorder.maxInFlight == 1, "synthesis must not run concurrently")
+    let chunks = await s.chunks
+    #expect(chunks.count > 1, "test needs a multi-chunk document to be meaningful")
+    // Chunks must be synthesized in document order.
+    let recorded = await recorder.order
+    #expect(recorded == chunks.map { String($0.text.prefix(12)) })
+}

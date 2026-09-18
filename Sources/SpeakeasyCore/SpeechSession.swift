@@ -29,7 +29,7 @@ public actor SpeechSession {
     public private(set) var chunks: [Chunk] = []
 
     private var states: [Int: ChunkState] = [:]
-    private var renderTasks: [Task<Void, Never>] = []
+    private var renderTask: Task<Void, Never>?
 
     public init(provider: any SpeechProvider,
                 preparer: TextPreparer = TextPreparer(),
@@ -75,40 +75,50 @@ public actor SpeechSession {
     /// doesn't need. Use `cancelAllAndWait()` when you actually need cancellation to
     /// have finished before proceeding (e.g. shutdown).
     public func cancelAll() {
-        for task in renderTasks { task.cancel() }
-        renderTasks = []
+        renderTask?.cancel()
+        renderTask = nil
     }
 
-    /// Like `cancelAll()`, but waits for every cancelled task to actually finish before
+    /// Like `cancelAll()`, but waits for the render task to actually finish before
     /// returning. Use this for shutdown, or anywhere the caller needs cancellation's
     /// effects to be fully settled — not on the `speak` hot path.
     public func cancelAllAndWait() async {
-        let tasks = renderTasks
-        renderTasks = []
-        for task in tasks { task.cancel() }
-        for task in tasks { _ = await task.value }
+        let task = renderTask
+        renderTask = nil
+        task?.cancel()
+        _ = await task?.value
     }
 
-    /// Test and CLI helper: resolves once every render task has finished.
+    /// Test and CLI helper: resolves once rendering has finished.
     public func waitForRenderComplete() async {
-        let tasks = renderTasks
-        for task in tasks { _ = await task.value }
+        _ = await renderTask?.value
     }
 
     // MARK: - Rendering
 
-    /// Synthesis runs continuously ahead of playback, not one chunk ahead. At 13-20x
-    /// realtime it outruns listening, which is what makes seeking feel instant.
+    /// Chunks render one at a time, strictly in document order — not fanned out into one
+    /// concurrent request per chunk. The backend runs a single model and serializes
+    /// internally, so N concurrent requests just make every one of them, including
+    /// chunk 0, wait behind N-1 others: time-to-first-sound scaled with document length
+    /// instead of staying flat. Measured directly against the server (4 equal-size
+    /// requests): concurrent — first chunk ready at 8.05s, all done at 8.05s; sequential
+    /// — first chunk ready at 1.97s, all done at 7.62s. Sequential wins on the metric
+    /// that matters and loses nothing on total throughput, since the server was batching
+    /// the concurrent requests internally anyway. Synthesis still runs at 7-20x realtime,
+    /// so a single sequential render task still comfortably outruns playback — the
+    /// continuous-read-ahead intent is preserved, it just no longer stampedes the server.
     private func startRendering(generation: Int, voice: String, speed: Double) {
-        for chunk in chunks {
-            let task = Task { [weak self] in
-                guard let self else { return }
+        let chunksToRender = chunks
+        renderTask = Task { [weak self] in
+            guard let self else { return }
+            for chunk in chunksToRender {
+                if Task.isCancelled { return }
+                guard await self.currentGeneration == generation else { return }
                 await self.render(chunk: chunk,
                                    generation: generation,
                                    voice: voice,
                                    speed: speed)
             }
-            renderTasks.append(task)
         }
     }
 
