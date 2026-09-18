@@ -86,6 +86,43 @@ degrading catastrophically rather than gracefully, or a footprint that breaks 8 
 
 **Done when:** the provider passes the existing `SpeechProvider` conformance expectations, and the memory test fails if a cache is deliberately introduced.
 
+### The performance envelope suite
+
+Alongside the statelessness test, build a small **opt-in performance suite** that runs the
+native provider under deliberately constrained settings, as a standing proxy for an average
+Mac rather than the development machine.
+
+**Shape it so it survives.** A wall-clock assertion inside the normal `swift test` run will
+fail whenever the machine is busy, get marked flaky, and then get disabled — at which point
+it protects nothing. So:
+
+- It lives behind an environment flag or a separate target, and is **not** part of the
+  default `swift test` run.
+- Its primary output is a **printed table of numbers**, not a pass/fail. Regressions are
+  visible even when nothing trips.
+- It carries exactly one assertion, against a **generous** budget with real headroom, to
+  catch order-of-magnitude regressions rather than noise.
+
+**Configurations to cover**, each a proxy for a weaker machine:
+
+| Configuration | Stands in for |
+|---|---|
+| Unconstrained | this M2 Max |
+| CPU only, GPU/Metal disabled | machines where the GPU path is unavailable or weak |
+| CPU only, 4 threads | a base M-series chip |
+| CPU only, 2 threads | the pessimistic floor |
+
+Report, for each: time to first audio, full synthesis time, and peak resident memory.
+
+**Be honest about what it is.** Fewer threads and no GPU is *directionally* like weaker
+hardware; it is not a MacBook Air. It cannot model memory bandwidth, thermal throttling on
+a fanless body, or a different chip generation. Name that limitation where the suite is
+documented so nobody later mistakes a green run for hardware coverage we do not have.
+
+Calibrate the budget from the constrained measurements taken in Phase 2, so it reflects
+something observed rather than a guess.
+
+
 ---
 
 ## Phase 4 — Let the provider set the chunk size
