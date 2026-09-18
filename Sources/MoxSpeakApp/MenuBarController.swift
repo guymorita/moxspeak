@@ -201,8 +201,14 @@ final class MenuBarController: NSObject {
     }
 
     /// The one-line summary at the top of the menu.
-    func setStatusLine(_ text: String) {
+    ///
+    /// Kept short on purpose. This row is a plain `NSMenuItem`, so whatever it says
+    /// sets the menu's width — a full sentence here stretched the whole menu to about
+    /// three times the width of its own controls. Guidance the user might want but
+    /// does not need to re-read every time goes in `hint`, shown on hover instead.
+    func setStatusLine(_ text: String, hint: String? = nil) {
         statusLineItem.title = text
+        statusLineItem.toolTip = hint
     }
 
     func setEngineStatus(_ text: String) {

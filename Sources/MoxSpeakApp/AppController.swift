@@ -754,7 +754,9 @@ final class AppController {
         }
 
         menuBar.setIcon(icon)
-        menuBar.setStatusLine(line)
+        menuBar.setStatusLine(line,
+                              hint: idleNote == nil ? nil
+                                  : "Select some text, or copy it, then press ⌥⇧S.")
         menuBar.setEngineStatus(health.summary)
         menuBar.setWarning(warningLine)
         menuBar.setTransport(canSpeak: true,

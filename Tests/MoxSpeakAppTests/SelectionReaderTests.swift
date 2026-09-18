@@ -102,7 +102,7 @@ import Foundation
                                          lastActedClipboardChangeCount: 91)
     #expect(reading.text == nil)
     #expect(reading.flash == "Nothing selected")
-    #expect(reading.note.contains("nothing is selected"))
+    #expect(reading.note.contains("selected"))
     // And it must be possible to find out from the log that a clipboard was declined,
     // not merely that nothing happened.
     #expect(reading.reason.contains("clipboard"))
@@ -425,8 +425,10 @@ private func press(clipboard: String?,
     // on either one.
     var mark: Int? = 500
     let reading = press(clipboard: "stale", changeCount: 500, mark: &mark)
-    #expect(reading.note.contains("nothing is selected"))
-    #expect(reading.note.contains("nothing new has been copied"))
+    #expect(reading.note.contains("selected"))
+    #expect(reading.note.contains("copied"))
+    // Terse on purpose: this string sets the width of the whole menu.
+    #expect(reading.note.count <= 40)
     #expect(reading.flash == "Nothing selected")
 }
 

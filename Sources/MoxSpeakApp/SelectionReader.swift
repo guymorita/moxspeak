@@ -395,9 +395,7 @@ enum SelectionReader {
                                          + "holds no text to speak",
                                    isTrusted: true,
                                    flash: "Nothing selected",
-                                   note: "nothing is selected, and the clipboard holds no "
-                                       + "text either — select some text, or copy some, "
-                                       + "and press ⌥⇧S again",
+                                   note: "nothing selected, and the clipboard is empty",
                                    clipboardChangeCountActedOn: clipboardChangeCount)
             }
 
@@ -415,9 +413,7 @@ enum SelectionReader {
                                      + "freshly copied to speak either",
                                isTrusted: true,
                                flash: "Nothing selected",
-                               note: "nothing is selected, and nothing new has been "
-                                   + "copied — select some text, or copy it, and press "
-                                   + "⌥⇧S again",
+                               note: "nothing selected or copied",
                                clipboardChangeCountActedOn: clipboardChangeCount)
 
         case .failed(let why):
