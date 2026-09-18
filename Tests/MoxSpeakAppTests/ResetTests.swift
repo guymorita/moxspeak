@@ -73,6 +73,9 @@ import Foundation
         settings.storedVoice = "af_bella"
         settings.storedRate = 1.5
         settings.storedEngine = "http"
+        for action in HotkeyAction.allCases {
+            settings.setStoredHotkey(action.defaultHotkey.storageString, for: action)
+        }
 
         // The domain itself, not `dictionaryRepresentation`, which folds in the global
         // and registration domains and would swamp three keys in several hundred.

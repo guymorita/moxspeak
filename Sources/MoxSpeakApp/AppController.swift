@@ -29,6 +29,13 @@ final class AppController {
     private let nowPlaying = NowPlayingController()
     private var menuBar: MenuBarController?
 
+    /// What is actually registered, per action. The menu, the status hint and the
+    /// shortcuts window all read their combinations from here rather than from a literal,
+    /// so a rebinding cannot leave one of them telling the user about a key that no longer
+    /// does anything.
+    private var hotkeyBindings: [HotkeyAction: Hotkey] = [:]
+    private var shortcuts: ShortcutsWindowController?
+
     /// A fresh `PlaybackEngine` per utterance rather than one reused for the app's
     /// lifetime. `AVAudioPlayerNode.stop()` and the pending-buffer count that
     /// `waitForDrain()` reads are easy to get out of step when a queue is torn down
@@ -55,7 +62,7 @@ final class AppController {
     /// error the user never saw.
     private var lastError: String?
     private var idleNote = "Ready"
-    /// True while a ⌥⇧S read is in flight. Tier 2 saves and restores the pasteboard, and
+    /// True while a speak-shortcut read is in flight. Tier 2 saves and restores the pasteboard, and
     /// two of those running at once would restore each other's work over the user's real
     /// clipboard, so a second press during a read is dropped and logged.
     private var isReadingSelection = false
@@ -98,6 +105,7 @@ final class AppController {
             selectRate: { [weak self] in self?.selectRate($0) },
             selectEngine: { [weak self] in self?.selectEngine($0) },
             enableSelectToSpeak: { [weak self] in self?.enableSelectToSpeak() },
+            openShortcuts: { [weak self] in self?.openShortcuts() },
             reset: { [weak self] in self?.resetEverything() },
             menuWillOpen: { [weak self] in self?.refreshSelectToSpeak() },
             quit: { NSApplication.shared.terminate(nil) }
@@ -124,22 +132,52 @@ final class AppController {
         beginEngine()
     }
 
+    /// Registers all three shortcuts, resolving each against what was stored first.
+    ///
+    /// The resolving step is where the macOS 15 defect is actually repaired for an
+    /// existing user. A binding stored by an older MoxSpeak is ⌥⇧-only and cannot fire;
+    /// `Settings.resolveHotkey` moves it to the combination that can, says so in the log,
+    /// and asks for the new value to be written back — so the change is traceable, happens
+    /// once, and never leaves anybody sitting on a shortcut that the system refuses to
+    /// deliver. See `Hotkey` for the restriction itself.
     private func installHotkeys() {
         var problems: [String] = []
-        do {
-            try hotkeys.register(.optionShiftS) { [weak self] in self?.speakText() }
-        } catch {
-            problems.append("\(error)")
+
+        for action in HotkeyAction.allCases {
+            let resolution = Settings.resolveHotkey(stored: settings.storedHotkey(action),
+                                                    action: action)
+            if let note = resolution.note { AppLog.write("hotkey: \(note)") }
+            if resolution.shouldRestore {
+                settings.setStoredHotkey(resolution.hotkey.storageString, for: action)
+            }
+
+            do {
+                try hotkeys.register(resolution.hotkey,
+                                     for: action,
+                                     handler: handler(for: action))
+                hotkeyBindings[action] = resolution.hotkey
+            } catch {
+                problems.append("\(error)")
+                // Still shown in the menu and the shortcuts window: a user cannot fix a
+                // shortcut they cannot see, and this is the binding they would be fixing.
+                hotkeyBindings[action] = resolution.hotkey
+            }
         }
-        do {
-            try hotkeys.register(.optionShiftSpace) { [weak self] in self?.togglePause() }
-        } catch {
-            problems.append("\(error)")
-        }
-        do {
-            try hotkeys.register(.optionShiftPeriod) { [weak self] in self?.stop() }
-        } catch {
-            problems.append("\(error)")
+
+        menuBar?.setHotkeys(hotkeyBindings)
+
+        // Said out loud once per launch for anyone still on the shipped combinations,
+        // because the change is otherwise invisible from the log alone: the user pressed
+        // ⌥⇧S for months, it stopped working without a word from macOS, and now it is a
+        // different key. Suppressed for anyone who has chosen their own — they know what
+        // they picked, and repeating the history at them every launch is noise.
+        if HotkeyAction.allCases.allSatisfy({ settings.storedHotkey($0) == nil }) {
+            let labels = HotkeyAction.allCases
+                .map { hotkeyBindings[$0]?.label ?? $0.defaultHotkey.label }
+                .joined(separator: ", ")
+            AppLog.write("hotkey: on the default shortcuts (\(labels)) — the old ⌥⇧ "
+                         + "combinations were dropped because macOS 15 and later refuse "
+                         + "to deliver shortcuts held with only Option and Shift")
         }
 
         guard !problems.isEmpty else { return }
@@ -150,6 +188,91 @@ final class AppController {
         hotkeyWarning = problems.joined(separator: "; ")
         menuBar?.flash("Hotkey unavailable — see menu", seconds: 4)
         AppLog.write("hotkey: \(hotkeyWarning ?? "")")
+    }
+
+    /// What each shortcut does. Held in one place so registering and re-registering cannot
+    /// disagree about which key speaks and which one stops.
+    private func handler(for action: HotkeyAction) -> @MainActor () -> Void {
+        switch action {
+        case .speak: return { [weak self] in self?.speakText() }
+        case .pause: return { [weak self] in self?.togglePause() }
+        case .stop: return { [weak self] in self?.stop() }
+        }
+    }
+
+    // MARK: - Rebinding
+
+    private func openShortcuts() {
+        let window = shortcuts ?? ShortcutsWindowController(actions: .init(
+            current: { [weak self] in self?.hotkeyBindings ?? [:] },
+            rebind: { [weak self] action, hotkey in
+                self?.rebind(action, to: hotkey) ?? "MoxSpeak is shutting down"
+            },
+            restoreDefaults: { [weak self] in self?.restoreDefaultHotkeys() ?? [:] }
+        ))
+        shortcuts = window
+        window.show()
+    }
+
+    /// Puts one action on a new combination, or explains why it cannot be.
+    ///
+    /// Nil means it took. Anything else is a sentence for the user, and the binding is
+    /// exactly what it was a moment ago — `HotkeyManager.register` registers the new
+    /// combination before releasing the old one, so a failure costs nothing.
+    ///
+    /// Persisted only after it is in force. Writing first would mean a combination that
+    /// Carbon refused still coming back at the next launch.
+    private func rebind(_ action: HotkeyAction, to hotkey: Hotkey) -> String? {
+        do {
+            try hotkeys.register(hotkey, for: action, handler: handler(for: action))
+        } catch let failure as HotkeyManager.Failure {
+            AppLog.write("hotkey: could not rebind \(action.rawValue) to "
+                         + "\(hotkey.label) — \(failure)")
+            return failure.explanation
+        } catch {
+            AppLog.write("hotkey: could not rebind \(action.rawValue) to "
+                         + "\(hotkey.label) — \(error)")
+            return "\(error)"
+        }
+
+        hotkeyBindings[action] = hotkey
+        settings.setStoredHotkey(hotkey.storageString, for: action)
+        menuBar?.setHotkeys(hotkeyBindings)
+        clearHotkeyWarningIfEverythingIsBound()
+        refresh()
+        AppLog.write("hotkey: \(action.rawValue) rebound to \(hotkey.label) and stored")
+        return nil
+    }
+
+    /// Back to the shipped three, and forget what was stored — a stored value identical to
+    /// the default is a value that would survive a change of default, which is not what
+    /// "use the defaults" means.
+    @discardableResult
+    private func restoreDefaultHotkeys() -> [HotkeyAction: Hotkey] {
+        for action in HotkeyAction.allCases {
+            let fallback = action.defaultHotkey
+            do {
+                try hotkeys.register(fallback, for: action, handler: handler(for: action))
+                hotkeyBindings[action] = fallback
+                settings.setStoredHotkey(nil, for: action)
+            } catch {
+                AppLog.write("hotkey: could not restore the default \(action.rawValue) "
+                             + "shortcut \(fallback.label) — \(error)")
+            }
+        }
+        menuBar?.setHotkeys(hotkeyBindings)
+        clearHotkeyWarningIfEverythingIsBound()
+        refresh()
+        AppLog.write("hotkey: restored the default shortcuts")
+        return hotkeyBindings
+    }
+
+    /// The standing warning is about shortcuts that would not register. Once every action
+    /// holds a live registration there is nothing left to warn about, and leaving the row
+    /// up would be the menu reporting a problem the user has already fixed.
+    private func clearHotkeyWarningIfEverythingIsBound() {
+        let allBound = HotkeyAction.allCases.allSatisfy { hotkeys.hotkey(for: $0) != nil }
+        if allBound { hotkeyWarning = nil }
     }
 
     // MARK: - Engines
@@ -306,7 +429,8 @@ final class AppController {
 
     // MARK: - Commands
 
-    /// ⌥⇧S. One shortcut, three tiers, and the user never picks between them.
+    /// The speak shortcut. One shortcut, three tiers, and the user never picks between
+    /// them.
     ///
     /// 1. Accessibility reads the selection out of the focused app. Instant, and the
     ///    clipboard is never touched.
@@ -507,7 +631,7 @@ final class AppController {
 
         // The grant lands whenever the user gets round to it, and macOS sends no
         // notification when it does. Nothing here polls: the next menu open re-checks,
-        // and so does the next ⌥⇧S.
+        // and so does the next press of the speak shortcut.
     }
 
     // MARK: - Reset
@@ -550,6 +674,12 @@ final class AppController {
         rate = Settings.resolveRate(stored: nil)
         voice = Settings.resolveVoice(stored: nil, available: [])
         menuBar?.setSelectedRate(rate)
+        // The shortcuts too: the domain has just been emptied, so a custom binding still
+        // registered in this process would be a preference the user cannot see and cannot
+        // account for — and the first rebinding after it would write into a domain they
+        // asked to be left clean.
+        restoreDefaultHotkeys()
+        shortcuts?.apply(hotkeyBindings)
         lastError = nil
         engineWarning = nil
 
@@ -571,7 +701,8 @@ final class AppController {
         refresh()
     }
 
-    /// The confirmation, and the only window this app ever puts on screen.
+    /// The confirmation. One of the two windows this app ever puts on screen, the other
+    /// being the shortcuts window.
     ///
     /// Two deliberate choices. "Cancel" is added *first*, which in an `NSAlert` makes it
     /// the rightmost, default, Return-activated button and leaves "Reset" beside it — the
@@ -754,9 +885,9 @@ final class AppController {
         }
 
         menuBar.setIcon(icon)
+        let speakKey = hotkeyBindings[.speak]?.label ?? HotkeyAction.speak.defaultHotkey.label
         menuBar.setStatusLine(line,
-                              hint: idleNote == nil ? nil
-                                  : "Select some text, or copy it, then press ⌥⇧S.")
+                              hint: "Select some text, or copy it, then press \(speakKey).")
         menuBar.setEngineStatus(health.summary)
         menuBar.setWarning(warningLine)
         menuBar.setTransport(canSpeak: true,

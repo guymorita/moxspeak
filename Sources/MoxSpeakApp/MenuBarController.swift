@@ -29,6 +29,10 @@ final class MenuBarController: NSObject {
         var selectRate: @MainActor (Float) -> Void
         var selectEngine: @MainActor (EngineChoice) -> Void
         var enableSelectToSpeak: @MainActor () -> Void
+        /// Open the shortcuts window. A window rather than a menu row because a recorder
+        /// has to receive raw key events, and an open `NSMenu` runs its own event-tracking
+        /// loop that consumes them — see `ShortcutsWindowController`.
+        var openShortcuts: @MainActor () -> Void
         /// Erase the two things MoxSpeak leaves outside its own bundle. Destructive, and
         /// confirmed by the controller before anything is touched — see `Reset`.
         var reset: @MainActor () -> Void
@@ -53,6 +57,7 @@ final class MenuBarController: NSObject {
     private let engineChoiceItem = NSMenuItem()
     private let engineItem = NSMenuItem()
     private let warningItem = NSMenuItem()
+    private let shortcutsItem = NSMenuItem()
     private let selectToSpeakItem = NSMenuItem()
     private let resetItem = NSMenuItem()
 
@@ -64,6 +69,20 @@ final class MenuBarController: NSObject {
     /// around a new choice without asking the engine for the list a second time.
     private var lastVoices: [Voice] = []
     private var lastNote: String?
+
+    /// How each shortcut is currently written, and the two pieces of state that decide
+    /// what the rows around them say.
+    ///
+    /// Held rather than recomputed from the controller each time because three separate
+    /// callers retitle these rows — `setHotkeys`, `setTransport` and `setSelectToSpeak` —
+    /// and each of them knows only its own third of the sentence. Before rebinding
+    /// existed the shortcut was a literal in three string constants; now that it can
+    /// change under a running menu, one of those three callers would otherwise put a
+    /// stale combination back.
+    private var hotkeyLabels: [HotkeyAction: String] = HotkeyAction.allCases
+        .reduce(into: [:]) { $0[$1] = $1.defaultHotkey.label }
+    private var selectToSpeakActive = false
+    private var transportIsPaused = false
 
     init(actions: Actions) {
         self.actions = actions
@@ -102,9 +121,10 @@ final class MenuBarController: NSObject {
         // Carbon hotkey fires too, so ⌥⇧Space would toggle pause twice and appear to do
         // nothing. The title tells the user what the key is without wiring a second path
         // to the same action.
-        configure(speakItem, title: "Speak Clipboard  (⌥⇧S)", action: #selector(speak))
-        configure(pauseItem, title: "Pause  (⌥⇧Space)", action: #selector(togglePause))
-        configure(stopItem, title: "Stop  (⌥⇧.)", action: #selector(stop))
+        configure(speakItem, title: "Speak Clipboard", action: #selector(speak))
+        configure(pauseItem, title: "Pause", action: #selector(togglePause))
+        configure(stopItem, title: "Stop", action: #selector(stop))
+        applyHotkeyTitles()
 
         menu.addItem(.separator())
 
@@ -127,6 +147,17 @@ final class MenuBarController: NSObject {
         engineChoiceItem.title = "Engine"
         engineChoiceItem.submenu = NSMenu()
         menu.addItem(engineChoiceItem)
+
+        // Beside the other three preferences, and a plain `NSMenuItem` like them: no
+        // custom view, so AppKit supplies the same text inset it gives "Voice" and
+        // "Engine" and this row needs no measuring to line up. The ellipsis says a window
+        // is coming.
+        shortcutsItem.title = "Keyboard Shortcuts…"
+        shortcutsItem.toolTip = "Change the keys that speak, pause and stop."
+        shortcutsItem.action = #selector(openShortcuts)
+        shortcutsItem.target = self
+        shortcutsItem.isEnabled = true
+        menu.addItem(shortcutsItem)
 
         menu.addItem(.separator())
 
@@ -230,9 +261,36 @@ final class MenuBarController: NSObject {
     /// Enables and titles the transport items for the current state.
     func setTransport(canSpeak: Bool, isPlaying: Bool, isPaused: Bool) {
         speakItem.isEnabled = canSpeak
-        pauseItem.title = (isPaused ? "Resume  (⌥⇧Space)" : "Pause  (⌥⇧Space)")
+        transportIsPaused = isPaused
+        applyHotkeyTitles()
         pauseItem.isEnabled = isPlaying
         stopItem.isEnabled = isPlaying
+    }
+
+    /// The combinations currently registered, pushed in at launch and again after every
+    /// rebinding. The menu is the only place most users will ever read them, so it has to
+    /// be the truth rather than what shipped.
+    func setHotkeys(_ hotkeys: [HotkeyAction: Hotkey]) {
+        for (action, hotkey) in hotkeys { hotkeyLabels[action] = hotkey.label }
+        applyHotkeyTitles()
+    }
+
+    private func label(_ action: HotkeyAction) -> String {
+        hotkeyLabels[action] ?? action.defaultHotkey.label
+    }
+
+    /// Writes the current combinations into every row that mentions one. One function, so
+    /// the three rows cannot disagree about which shortcut does what.
+    private func applyHotkeyTitles() {
+        speakItem.title = selectToSpeakActive
+            ? "Speak Clipboard  (\(label(.speak)) reads the selection)"
+            : "Speak Clipboard  (\(label(.speak)))"
+        pauseItem.title = (transportIsPaused ? "Resume" : "Pause") + "  (\(label(.pause)))"
+        stopItem.title = "Stop  (\(label(.stop)))"
+        if selectToSpeakActive {
+            selectToSpeakItem.toolTip = "\(label(.speak)) reads whatever is selected. "
+                                      + "If nothing is selected, it says so."
+        }
     }
 
     /// Replaces the voice submenu.
@@ -360,7 +418,7 @@ final class MenuBarController: NSObject {
     /// Worded from the user's side. "Enable Select-to-Speak…" says what they get; the
     /// ellipsis says a system dialog is coming. Nothing here mentions Accessibility
     /// APIs, trusted processes or `AXUIElement`, because none of that is the user's
-    /// problem. The ⌥⇧S item is retitled to match, so the menu never claims to read the
+    /// problem. The speak item is retitled to match, so the menu never claims to read the
     /// clipboard while it is actually reading the selection, or the reverse.
     ///
     /// With select-to-speak on, the *item* still says clipboard while the *shortcut*
@@ -369,14 +427,12 @@ final class MenuBarController: NSObject {
     /// left to read. The item reads the clipboard because the clipboard is the only
     /// honest thing it can read.
     func setSelectToSpeak(active: Bool) {
+        selectToSpeakActive = active
         if active {
             selectToSpeakItem.title = "Select-to-Speak is on"
-            selectToSpeakItem.toolTip = "⌥⇧S reads whatever is selected. "
-                                      + "If nothing is selected, it says so."
             selectToSpeakItem.state = .on
             selectToSpeakItem.action = nil
             selectToSpeakItem.isEnabled = false
-            speakItem.title = "Speak Clipboard  (⌥⇧S reads the selection)"
         } else {
             selectToSpeakItem.title = "Enable Select-to-Speak…"
             selectToSpeakItem.toolTip = "Let MoxSpeak read text you have selected, "
@@ -385,8 +441,8 @@ final class MenuBarController: NSObject {
             selectToSpeakItem.state = .off
             selectToSpeakItem.action = #selector(enableSelectToSpeak)
             selectToSpeakItem.isEnabled = true
-            speakItem.title = "Speak Clipboard  (⌥⇧S)"
         }
+        applyHotkeyTitles()
     }
 
     /// Pushes a rate into the slider and the exact-value field — a launch restore, a
@@ -417,6 +473,7 @@ final class MenuBarController: NSObject {
 
     @objc private func speak() { actions.speak() }
     @objc private func enableSelectToSpeak() { actions.enableSelectToSpeak() }
+    @objc private func openShortcuts() { actions.openShortcuts() }
     @objc private func togglePause() { actions.togglePause() }
     @objc private func stop() { actions.stop() }
     @objc private func reset() { actions.reset() }

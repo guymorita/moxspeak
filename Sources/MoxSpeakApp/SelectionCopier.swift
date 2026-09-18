@@ -208,9 +208,10 @@ enum SelectionCopier {
 
     /// Posts ⌘C, with the user's real modifiers held out of it.
     ///
-    /// The subtlety: this runs off a ⌥⇧S hotkey, so Option and Shift are very likely
-    /// still physically down when it fires. An event that inherited them would arrive as
-    /// ⌥⇧⌘C, which is not "copy" in any app and is a real shortcut in some. A
+    /// The subtlety: this runs off a global hotkey, so that hotkey's modifiers — ⌃ and
+    /// ⌥ by default — are very likely still physically down when it fires. An event that
+    /// inherited them would arrive as ⌃⌥⌘C, which is not "copy" in any app and is a real
+    /// shortcut in some. A
     /// `.privateState` event source carries its own modifier state rather than the
     /// hardware's, so declaring `.maskCommand` on the event means ⌘ and nothing else.
     ///
