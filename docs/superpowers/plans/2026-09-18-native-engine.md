@@ -413,16 +413,45 @@ first-launch behaviour. ✅
 
 ---
 
-## Phase 8 — End-to-end verification
+## Phase 8 — End-to-end verification ✅ *(done 2026-09-18)*
 
-Against the four properties, with numbers:
+All five properties hold. Full record, written for a person, in
+`.superpowers/phase8-verification.md`. 299 tests, zero warnings.
 
-1. **Self-contained:** stop Kokoro entirely, confirm the app still speaks.
-2. **Fast:** time to first sound, unique text per run, median of at least 6. Target under 0.5s.
-3. **Stateless:** 200 consecutive syntheses; report time-to-first-sound for the first and last ten, and resident memory across the run. Both should be flat.
-4. **Durable:** a written record of every pinned version and vendored component.
+| property | headline |
+|---|---|
+| 1. Self-contained | Kokoro killed; app spoke. **0 sockets, 0 child processes, 0 python mappings.** |
+| 2. Fast | **median 0.336 s** over 12 varied unique-text runs (0.238–0.369); slowest of 24 runs 0.369 s against a 0.5 s budget |
+| 3. Stateless | 200 utterances: RSS **361.2 → 362.3 MB (+1.1 MB)**; last-ten TTFA median 0.197 s vs first-ten 0.345 s — **run 200 is 0.57× run 1** |
+| 4. Durable | inventory written: pins, vendored commits, asset hashes, clean-checkout build in 3 commands / 98 s |
+| 5. macOS versions | floor **14.0 verified four ways** and by the compiler (zero `@available` anywhere); **macOS 26 still untested on hardware** |
 
-Plus a quality spot-check: the normalizer's corpus through the full native path, confirming numbers, currency and dates sound right.
+**Property 1's accidental control, again.** One ⌥⇧S reached both builds: the native one
+logged `first sound after 0.386s`, the installed HTTP one logged `Could not connect to the
+server` in the same second.
+
+**Property 3 is the one that mattered.** The old engine leaked ~28 MB per request — 5.6 GB
+over 200. Measured slope here: **+6.5 KB per utterance**, 0.02% of a 363 MB process, which
+is allocator noise. Zero timeouts, zero failures, 25,910 characters in 34 minutes.
+
+**Reported rather than smoothed over:** around runs 102–115 time-to-first-sound stepped
+down from ~0.35 s to ~0.197 s and stayed there. A step, not a drift, and not thermal — the
+machine had been inferring continuously for 30 minutes and got *better*. Cause unproven
+(power state, or Metal's function cache finishing its warm-up). It moves in the safe
+direction, but the honest reading of "run 200 is as fast as run 1" is "faster, for a reason
+nobody has pinned down".
+
+**Re-verified after `rm -rf .build`:** Core builds with **0 Cmlx object files**, 0
+`import MLX`, 0 undefined mlx symbols; `swift test` × 3 → 299/299/299; 299 with `Models/`
+absent; 299 with real inference; `build-app.sh` from clean → 98 s, signed, valid. Bundle
+**217.7 MiB (228 MB), 171.6 MiB (179.9 MB) zipped**. HTTP engine with a server up: 72
+voices, first sound 0.451 s.
+
+**Quality spot-check found three real defects**, all normalizer-side and all unowned:
+`2:04:36` keeps its colons into the phoneme string (H:MM:SS is unhandled), `5:45pm` loses
+the space and becomes "fivepeem", `9am` is not expanded at all, and `Mon.-Fri.` drops the
+range. Currency, dates, percent, units, decimals, version numbers and phone digits are all
+correct.
 
 ---
 
@@ -481,3 +510,9 @@ needs nothing but the app.
 
 **URL and email normalization.** Phase 1's known gap, still unowned. The worst remaining
 MisakiSwift failure, and relevant because web articles are a primary use case.
+
+**The normalizer defects Phase 8's spot-check found.** `2:04:36` (H:MM:SS) keeps its colons
+all the way into the phoneme string; `5:45pm` loses the space before the meridiem and is
+pronounced "fivepeem"; `9am` is not expanded at all; `Mon.-Fri.` becomes "Monday Friday"
+with the range dropped. Same class as the URL gap above, same lack of an owner. Durations,
+race times and opening hours are not exotic text.
