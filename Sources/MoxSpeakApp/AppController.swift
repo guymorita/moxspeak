@@ -80,11 +80,11 @@ final class AppController {
 
         // The voice cannot be checked against the engine's list yet — nothing has been
         // asked of the engine at this point — so it is resolved again in `loadVoices`
-        // once there is a list to check it against. The speed can be settled here and
-        // for good: the menu's five speeds are known at compile time.
+        // once there is a list to check it against. The speed needs no such list: the
+        // control offers the whole range `PlaybackEngine` will honour, so resolving it
+        // is just validating and clamping — settled here and for good.
         self.voice = Settings.resolveVoice(stored: settings.storedVoice, available: [])
-        self.rate = Settings.resolveRate(stored: settings.storedRate,
-                                         offered: MenuBarController.rates)
+        self.rate = Settings.resolveRate(stored: settings.storedRate)
     }
 
     // MARK: - Launch
@@ -448,6 +448,10 @@ final class AppController {
     }
 
     private func selectRate(_ value: Float) {
+        // The slider and the exact-value field both clamp before calling this, but a
+        // second clamp here costs nothing and means this method's own contract does not
+        // depend on every future caller remembering to.
+        let value = SpeedControl.clamped(value)
         rate = value
         settings.storedRate = value
         // TimePitch applies this instantly and pitch-corrected, so the current utterance
@@ -516,7 +520,7 @@ final class AppController {
         // running app carried on at 1.25× in am_michael would be a reset the user cannot
         // see — and the next voice or speed change would write those same values back
         // into the domain they just emptied.
-        rate = Settings.resolveRate(stored: nil, offered: MenuBarController.rates)
+        rate = Settings.resolveRate(stored: nil)
         voice = Settings.resolveVoice(stored: nil, available: [])
         menuBar?.setSelectedRate(rate)
         lastError = nil
@@ -716,7 +720,7 @@ final class AppController {
             line = "Paused"
         } else if isPlaying {
             icon = .speaking
-            line = "Speaking at \(MenuBarController.rateTitle(rate)) in \(voice)"
+            line = "Speaking at \(SpeedControl.format(rate)) in \(voice)"
         } else {
             icon = .idle
             line = idleNote

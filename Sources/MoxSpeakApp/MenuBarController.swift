@@ -39,11 +39,6 @@ final class MenuBarController: NSObject {
         var quit: @MainActor () -> Void
     }
 
-    /// The speeds the app can be in. `nonisolated` because this list is the definition
-    /// of a valid speed, and `Settings` has to be able to check a restored one against it
-    /// without touching the main actor.
-    nonisolated static let rates: [Float] = [0.75, 1.0, 1.25, 1.5, 2.0]
-
     private let actions: Actions
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
@@ -54,6 +49,7 @@ final class MenuBarController: NSObject {
     private let stopItem = NSMenuItem()
     private let voiceItem = NSMenuItem()
     private let rateItem = NSMenuItem()
+    private let speedControlView = SpeedControlView()
     private let engineChoiceItem = NSMenuItem()
     private let engineItem = NSMenuItem()
     private let warningItem = NSMenuItem()
@@ -69,6 +65,7 @@ final class MenuBarController: NSObject {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
+        speedControlView.onChange = { [weak self] rate in self?.actions.selectRate(rate) }
         buildMenu()
         menu.delegate = self
         statusItem.menu = menu
@@ -110,8 +107,13 @@ final class MenuBarController: NSObject {
         voiceItem.submenu = NSMenu()
         menu.addItem(voiceItem)
 
+        // A custom view rather than a submenu: dragging is the whole appeal over the old
+        // five fixed presets, and a slider buried one level down would cost a click just
+        // to reach the thing the owner asked for. `isEnabled` stays true so AppKit routes
+        // mouse events into the view instead of treating the row as inert.
         rateItem.title = "Speed"
-        rateItem.submenu = buildRateMenu()
+        rateItem.view = speedControlView
+        rateItem.isEnabled = true
         menu.addItem(rateItem)
 
         // Beside Voice and Speed, because it is the same kind of thing: a preference the
@@ -159,26 +161,6 @@ final class MenuBarController: NSObject {
         item.target = self
         item.isEnabled = true
         menu.addItem(item)
-    }
-
-    private func buildRateMenu() -> NSMenu {
-        let submenu = NSMenu()
-        submenu.autoenablesItems = false
-        for rate in Self.rates {
-            let item = NSMenuItem(title: Self.rateTitle(rate),
-                                  action: #selector(selectRate(_:)),
-                                  keyEquivalent: "")
-            item.target = self
-            item.isEnabled = true
-            item.representedObject = NSNumber(value: rate)
-            item.state = (rate == 1.0) ? .on : .off
-            submenu.addItem(item)
-        }
-        return submenu
-    }
-
-    static func rateTitle(_ rate: Float) -> String {
-        rate == rate.rounded() ? "\(Int(rate))×" : "\(rate)×"
     }
 
     // MARK: - State the controller pushes in
@@ -342,10 +324,10 @@ final class MenuBarController: NSObject {
         }
     }
 
+    /// Pushes a rate into the slider and the exact-value field — a launch restore, a
+    /// reset, or the menu being about to reopen after something else changed it.
     func setSelectedRate(_ rate: Float) {
-        for item in rateItem.submenu?.items ?? [] {
-            item.state = ((item.representedObject as? NSNumber)?.floatValue == rate) ? .on : .off
-        }
+        speedControlView.setSpeed(rate)
     }
 
     /// A brief, non-modal acknowledgement shown beside the icon, then removed.
@@ -378,11 +360,6 @@ final class MenuBarController: NSObject {
     @objc private func selectVoice(_ sender: NSMenuItem) {
         guard let id = (sender.representedObject as? NSString) as String? else { return }
         actions.selectVoice(id)
-    }
-
-    @objc private func selectRate(_ sender: NSMenuItem) {
-        guard let rate = (sender.representedObject as? NSNumber)?.floatValue else { return }
-        actions.selectRate(rate)
     }
 
     @objc private func selectEngine(_ sender: NSMenuItem) {

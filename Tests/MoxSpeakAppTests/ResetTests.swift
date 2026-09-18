@@ -111,9 +111,7 @@ import Foundation
         let voices = ["af_bella", "am_michael", "bf_emma"]
         #expect(Settings.resolveVoice(stored: settings.storedVoice, available: voices)
                 == Settings.defaultVoice)
-        #expect(Settings.resolveRate(stored: settings.storedRate,
-                                     offered: MenuBarController.rates)
-                == Settings.defaultRate)
+        #expect(Settings.resolveRate(stored: settings.storedRate) == Settings.defaultRate)
         #expect(Settings.resolveEngine(stored: settings.storedEngine)
                 == Settings.defaultEngine)
         // And the default engine is the one that needs nothing else installed, which is
