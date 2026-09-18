@@ -60,6 +60,7 @@ final class MenuBarController: NSObject {
     private let shortcutsItem = NSMenuItem()
     private let selectToSpeakItem = NSMenuItem()
     private let resetItem = NSMenuItem()
+    private let versionItem = NSMenuItem()
 
     /// Guards the transient flash message: a later flash must not be wiped by an earlier
     /// one's expiry.
@@ -185,6 +186,16 @@ final class MenuBarController: NSObject {
         resetItem.target = self
         resetItem.isEnabled = true
         menu.addItem(resetItem)
+
+        // Quiet and informational, in the style of `engineItem` above: a plain
+        // `NSMenuItem`, disabled so it reads as text rather than a control, with nothing
+        // to click. Right by Quit because that is the last thing on the menu, and a build
+        // identity is the kind of thing you go looking for at the bottom of something,
+        // not the top. Computed once at menu build time — unlike the engine status, the
+        // running build does not change out from under a live process.
+        versionItem.title = AppVersion.read().display
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
 
         let quitItem = NSMenuItem(title: "Quit MoxSpeak", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self

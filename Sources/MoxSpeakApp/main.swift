@@ -34,6 +34,7 @@ final class MoxSpeakAppDelegate: NSObject, NSApplicationDelegate {
         // anything, something has started asking for a permission this app must not need.
         let trusted = AXIsProcessTrusted()
         AppLog.write("launch: pid \(ProcessInfo.processInfo.processIdentifier), "
+                     + "\(AppVersion.read().logLine), "
                      + "AXIsProcessTrusted=\(trusted) — select-to-speak "
                      + (trusted ? "available" : "off, reading the clipboard"))
 
