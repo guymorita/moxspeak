@@ -33,8 +33,12 @@ struct TextReading {
     /// 2. `copy` — Accessibility found nothing, so the app was asked to copy and the
     ///    pasteboard was put back afterwards. Slower by a few tens of milliseconds, and
     ///    it reaches apps no amount of attribute-walking ever will.
-    /// 3. `clipboard` — no Accessibility permission at all. Read what was copied, exactly
-    ///    as MoxSpeak has always done with no permissions.
+    /// 3. `clipboard` — read what was copied, exactly as MoxSpeak has always done with no
+    ///    permissions. Reached two ways: with no Accessibility permission at all, where it
+    ///    is the only thing there is to read; and *with* the permission, when tiers 1 and 2
+    ///    agree nothing is selected but the user has just filled the clipboard — see
+    ///    `ClipboardFreshness`. Both are "the text came off the clipboard", which is what
+    ///    this case is for saying.
     enum Source: String {
         case selection
         case copy
@@ -67,6 +71,73 @@ struct TextReading {
 
     /// The same thing at slightly greater length, for the menu's status line and the log.
     let note: String
+
+    /// The pasteboard `changeCount` this press *acted on* — spoke aloud, or looked at and
+    /// declined — or nil when the clipboard was never consulted at all.
+    ///
+    /// This is the half of the freshness rule that cannot be a pure function of the
+    /// inputs: deciding is one thing, remembering what was decided is another, and the
+    /// caller is the only part of this that outlives a single press. Carrying it here
+    /// rather than reporting it as a side effect keeps the whole rule inside `decide`,
+    /// where it can be replayed press-by-press in a test.
+    ///
+    /// Nil on tiers 1 and 2's successes by construction: a press that read the selection
+    /// never looked at the clipboard, so it has no business moving the mark that says
+    /// when the clipboard was last looked at.
+    let clipboardChangeCountActedOn: Int?
+
+    init(text: String?,
+         source: Source,
+         reason: String,
+         isTrusted: Bool,
+         flash: String,
+         note: String,
+         clipboardChangeCountActedOn: Int? = nil) {
+        self.text = text
+        self.source = source
+        self.reason = reason
+        self.isTrusted = isTrusted
+        self.flash = flash
+        self.note = note
+        self.clipboardChangeCountActedOn = clipboardChangeCountActedOn
+    }
+}
+
+/// Whether the clipboard holds something the user has *just put there*.
+///
+/// The distinction this draws is the one the original "never speak a stale clipboard" rule
+/// was missing. That rule was written against a real failure — text copied twenty minutes
+/// ago, spoken with total confidence when nothing was selected — and it fixed it by
+/// refusing the clipboard outright whenever the selection read came back empty. But
+/// "nothing is selected" and "the user just copied something" are not mutually exclusive:
+/// in a full-screen TUI that swallows mouse selection, copy-then-press is the *only*
+/// workflow there is, and it is how MoxSpeak worked before Accessibility existed. Refusing
+/// both cases with one rule broke the second to fix the first.
+///
+/// `NSPasteboard.changeCount` is the signal that tells them apart. It increments on every
+/// write by anyone, so remembering the count MoxSpeak last acted on turns "is this stale?"
+/// into a question with an answer rather than a guess:
+///
+/// - Copied two seconds ago: the count has moved since we last acted → fresh → speak it.
+/// - Untouched since the last press: the count is exactly where we left it → not fresh →
+///   stay silent, which is the original bug staying fixed.
+///
+/// Acting on a clipboard — speaking it *or* declining it — updates the mark, so each
+/// distinct copy gets exactly one chance to be spoken and a second press on the same copy
+/// is silent. And the mark is set at launch (`SelectionReader.recordClipboardBaseline`),
+/// so the first press of a session does not mistake a long-dead clipboard for a fresh one.
+enum ClipboardFreshness {
+
+    /// Whether `changeCount` represents a write that landed after we last acted.
+    ///
+    /// A nil mark means MoxSpeak has never acted on the clipboard *and* never recorded a
+    /// launch baseline. That should not happen — the baseline is recorded at launch — and
+    /// the conservative answer is the one that cannot be confidently wrong: not fresh.
+    /// Inventing freshness from the absence of a record is how the original bug worked.
+    static func isFresh(changeCount: Int, lastActedOn mark: Int?) -> Bool {
+        guard let mark else { return false }
+        return changeCount != mark
+    }
 }
 
 /// Reads what the user wants spoken.
@@ -94,7 +165,14 @@ struct TextReading {
 /// text the user copied twenty minutes ago, spoken with complete confidence, with nothing
 /// on screen to say why. The fix is not a better guess, it is a real answer — tier 2 asks
 /// the app to copy, and a pasteboard that does not change is the app saying *nothing was
-/// selected*. That case now says so out loud and speaks nothing.
+/// selected*. That case says so out loud and speaks nothing.
+///
+/// **…but "stale" and "just copied" are different things.** The first version of that rule
+/// refused the clipboard in *both* cases, which broke copy-then-press — the way this app
+/// worked before Accessibility existed, and the only way it can work in a full-screen TUI
+/// that eats mouse selection. `ClipboardFreshness` is the missing distinction: when
+/// nothing is selected, a clipboard written since MoxSpeak last acted on it is spoken, and
+/// one sitting untouched since the last press is not. Each copy gets one chance.
 enum SelectionReader {
 
     /// Whether macOS currently trusts this process for Accessibility.
@@ -115,6 +193,36 @@ enum SelectionReader {
     /// Raises the system Accessibility dialog. User-initiated only.
     static func requestPermission() {
         _ = AXIsProcessTrustedWithOptions([promptOptionKey: true] as CFDictionary)
+    }
+
+    /// The pasteboard `changeCount` MoxSpeak last spoke or last declined.
+    ///
+    /// The only mutable state in this file, and it is one integer. Main-actor isolated
+    /// because the only things that touch it are the hotkey path and launch, both of
+    /// which are already there — no locking, and Swift 6 has nothing to complain about.
+    ///
+    /// Nil means "never recorded", which `ClipboardFreshness` reads as *not* fresh. That
+    /// is unreachable in the real app (launch records a baseline before the first press
+    /// is possible) and is the safe answer if it ever became reachable.
+    @MainActor private(set) static var lastActedClipboardChangeCount: Int?
+
+    /// Take the launch baseline, so the first press of a session does not mistake a
+    /// clipboard filled yesterday for one filled just now.
+    ///
+    /// Called from `applicationDidFinishLaunching`. It costs one cheap property read and
+    /// touches no Accessibility API, so it is safe on the untrusted path too — a user who
+    /// never grants the permission simply never consults the value.
+    ///
+    /// Returns the count it recorded, and writes nothing to the log itself. The log line
+    /// belongs at the launch site: this function is also what a test calls, and a test
+    /// that appends to `~/Library/Logs/MoxSpeak.log` is putting invented events into the
+    /// one file the owner reads to find out what really happened.
+    @MainActor
+    @discardableResult
+    static func recordClipboardBaseline(_ pasteboard: NSPasteboard = .general) -> Int {
+        let count = pasteboard.changeCount
+        lastActedClipboardChangeCount = count
+        return count
     }
 
     /// The three tiers, in order, with the first one that answers winning.
@@ -141,12 +249,30 @@ enum SelectionReader {
                           clipboard: nil)
         }
 
+        // Both of these are read *before* tier 2 runs, and that ordering is load-bearing.
+        // A copy moves `changeCount` by definition, and the restore that follows an
+        // emptied pasteboard moves it again — so a count read afterwards would look
+        // freshly written on every single press and the rule below would degenerate into
+        // "always speak the clipboard", which is the bug it exists to prevent. What
+        // freshness is a question about is the clipboard the user had in hand when they
+        // pressed the key, so that is the one measured.
+        let clipboard = clipboardText(pasteboard)
+        let changeCount = pasteboard.changeCount
+
         let copied = await SelectionCopier.copySelection(pasteboard: pasteboard)
-        return decide(isTrusted: true,
-                      selection: nil,
-                      evidence: selection.evidence,
-                      copied: copied,
-                      clipboard: clipboardText(pasteboard))
+        let reading = decide(isTrusted: true,
+                             selection: nil,
+                             evidence: selection.evidence,
+                             copied: copied,
+                             clipboard: clipboard,
+                             clipboardChangeCount: changeCount,
+                             lastActedClipboardChangeCount: lastActedClipboardChangeCount)
+
+        // Spoken or declined, this copy has had its turn.
+        if let acted = reading.clipboardChangeCountActedOn {
+            lastActedClipboardChangeCount = acted
+        }
+        return reading
     }
 
     /// The decision itself, with the world passed in.
@@ -156,17 +282,32 @@ enum SelectionReader {
     /// is unreachable on a machine where the permission has never been granted. Keeping
     /// the rule pure means it is verifiable anywhere; only the readers around it need a
     /// real Mac to exercise.
+    ///
+    /// `clipboardChangeCount` and `lastActedClipboardChangeCount` are the freshness
+    /// question, and they are consulted in exactly one branch — tier 2 answering
+    /// "nothing is selected". Their defaults mean "no freshness information", which
+    /// `ClipboardFreshness` reads as not fresh: a caller that does not know cannot be
+    /// talked into speaking a clipboard.
     static func decide(isTrusted: Bool,
                        selection: String?,
                        evidence: SelectionEvidence = .none,
                        copied: CopyOutcome = .notAttempted,
-                       clipboard: String?) -> TextReading {
+                       clipboard: String?,
+                       clipboardChangeCount: Int = 0,
+                       lastActedClipboardChangeCount: Int? = nil) -> TextReading {
 
         // MARK: Tier 3 — no permission.
         guard isTrusted else {
             // `selection` and `copied` are ignored here by construction — `read` fetches
             // neither without permission, because both need it — and the assertion is
             // worth keeping honest in tests.
+            //
+            // Freshness is ignored too, and deliberately. With no permission the
+            // clipboard is not a fallback, it is the entire feature: ⌥⇧S means "speak
+            // what I copied" and always has. Applying the freshness rule here would make
+            // the second press on the same text silent, which would be a new bug rather
+            // than a fix. Nothing is recorded either, for the same reason — there is no
+            // mark to keep when nothing is ever declined.
             return TextReading(text: clipboard,
                                source: .clipboard,
                                reason: "select-to-speak is off "
@@ -216,17 +357,68 @@ enum SelectionReader {
 
         case .nothingSelected:
             // The whole point of tier 2. An app asked to copy that copies nothing has
-            // told us, definitively, that there is no selection — so the clipboard is not
-            // a fallback here, it is unrelated text, and it stays unspoken.
+            // told us, definitively, that there is no selection.
+            //
+            // What that does *not* tell us is whether the clipboard is stale. Only
+            // `changeCount` knows, so this is the one branch that asks — and whichever
+            // way it answers, this copy has now had its turn and the mark moves.
+            let settled = "\(axNote), and asking the app to copy changed nothing — "
+                        + "so nothing is selected"
+            let fresh = ClipboardFreshness.isFresh(changeCount: clipboardChangeCount,
+                                                   lastActedOn: lastActedClipboardChangeCount)
+
+            if fresh, let clipboard {
+                // The owner's workflow: copy in a terminal that forwards its own
+                // selection, then press. Nothing is selected because the TUI owns the
+                // mouse, and the thing he wants spoken is sitting on the clipboard where
+                // he put it two seconds ago.
+                return TextReading(text: clipboard,
+                                   source: .clipboard,
+                                   reason: "\(settled). The clipboard has been written "
+                                         + "since MoxSpeak last acted on it (change count "
+                                         + "\(clipboardChangeCount)), so it holds something "
+                                         + "freshly copied — spoke that",
+                                   isTrusted: true,
+                                   flash: "Nothing selected",
+                                   note: "nothing is selected",
+                                   clipboardChangeCountActedOn: clipboardChangeCount)
+            }
+
+            if fresh {
+                // Written since we last looked, but there are no words on it — an image,
+                // a file, a cleared clipboard. Worth distinguishing from "unchanged",
+                // because the reason it went unspoken is a different reason.
+                return TextReading(text: nil,
+                                   source: .copy,
+                                   reason: "\(settled), and the clipboard has been "
+                                         + "written since MoxSpeak last acted on it but "
+                                         + "holds no text to speak",
+                                   isTrusted: true,
+                                   flash: "Nothing selected",
+                                   note: "nothing is selected, and the clipboard holds no "
+                                       + "text either — select some text, or copy some, "
+                                       + "and press ⌥⇧S again",
+                                   clipboardChangeCountActedOn: clipboardChangeCount)
+            }
+
+            // Nothing selected, and nothing copied since the last time we looked. This is
+            // the original bug's case and it stays silent. Note what this line does *not*
+            // claim: the previous wording said the clipboard "holds something else",
+            // which was an assertion about content we had never compared — and in the
+            // owner's case it was flatly untrue. All we know, and all we say, is that the
+            // clipboard has not moved.
             return TextReading(text: nil,
                                source: .copy,
-                               reason: "\(axNote), and asking the app to copy changed "
-                                     + "nothing — so nothing is selected. Did not speak "
-                                     + "the clipboard, which holds something else",
+                               reason: "\(settled), and the clipboard has not changed "
+                                     + "since MoxSpeak last looked at it (change count "
+                                     + "\(clipboardChangeCount)) — so there was nothing "
+                                     + "freshly copied to speak either",
                                isTrusted: true,
                                flash: "Nothing selected",
-                               note: "nothing is selected — "
-                                   + "select some text and press ⌥⇧S again")
+                               note: "nothing is selected, and nothing new has been "
+                                   + "copied — select some text, or copy it, and press "
+                                   + "⌥⇧S again",
+                               clipboardChangeCountActedOn: clipboardChangeCount)
 
         case .failed(let why):
             return TextReading(text: nil,
