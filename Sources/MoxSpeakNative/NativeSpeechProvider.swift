@@ -1,4 +1,5 @@
 import Foundation
+import MLX
 import MoxSpeakCore
 
 /// `MoxSpeakCore.SpeechProvider` backed by in-process Kokoro inference.
@@ -104,9 +105,35 @@ public actor NativeSpeechProvider: SpeechProvider {
 
     static let measuredCharacterCap = 100
 
+    /// Ceiling on MLX's total allocation (`MLX.Memory.memoryLimit`), applied once when the
+    /// model loads.
+    ///
+    /// Unbounded, peak MLX allocation for a single chunk reaches **~1.7 GB at the 100-char
+    /// `recommendedCharacterCap`** (Phase 3b, `.superpowers/native-provider-report.md`) —
+    /// fine on this 64 GB development machine, uncomfortable on an 8 GB MacBook Air with a
+    /// browser open, which the plan names as a real target, not a hypothetical one.
+    ///
+    /// `PerformanceEnvelopeTests` measured what a ceiling here actually costs (release
+    /// build, 150-char chunk):
+    ///
+    ///     unconstrained          0.359 s
+    ///     512 MB MLX ceiling     0.399 s   (+11%)
+    ///
+    /// +11% latency for a bounded footprint is a good trade — the constrained figure is
+    /// still comfortably under the plan's half-second target and 2.7x faster than the HTTP
+    /// server's unconstrained 1.949 s. 512 MB is not a magic number beyond "measured and
+    /// acceptable"; it is exposed as `mlxMemoryLimit` below rather than hardcoded inside
+    /// `synthesize` so it can be tuned (or disabled, by passing `.max`) without touching
+    /// call-path code.
+    public static let defaultMLXMemoryLimit = 512 << 20   // 512 MB
+
     // MARK: - State
 
     public nonisolated let assets: NativeModelAssets
+
+    /// The MLX memory ceiling this instance applies at model load. See
+    /// `defaultMLXMemoryLimit`.
+    public nonisolated let mlxMemoryLimit: Int
 
     /// Loaded once, on first use, and kept. Not recreated per request — the whole point.
     private var engine: NativeKokoroEngine?
@@ -114,13 +141,21 @@ public actor NativeSpeechProvider: SpeechProvider {
     /// rather than assume it; there is no other way to observe it from outside.
     private(set) var modelLoadCount = 0
 
-    /// - Parameter assets: where the weights and voices live. Defaults to fp16, which the
-    ///   Phase 3 measurement found acoustically indistinguishable from our own f32
-    ///   (0.85 dB mel LSD, 0.9994 cosine) at half the size — 156 MB against 312 MB.
-    ///   `NativeKokoroEngine` still defaults to f32 because the comparison harness needs a
-    ///   reference; the provider is the product surface, so it takes the shipping choice.
-    public init(assets: NativeModelAssets = .resolveDefault(precision: .float16)) {
+    /// - Parameters:
+    ///   - assets: where the weights and voices live. Defaults to fp16, which the
+    ///     Phase 3 measurement found acoustically indistinguishable from our own f32
+    ///     (0.85 dB mel LSD, 0.9994 cosine) at half the size — 156 MB against 312 MB.
+    ///     `NativeKokoroEngine` still defaults to f32 because the comparison harness needs
+    ///     a reference; the provider is the product surface, so it takes the shipping
+    ///     choice.
+    ///   - mlxMemoryLimit: ceiling applied to `MLX.Memory.memoryLimit` when the model
+    ///     loads. Defaults to `defaultMLXMemoryLimit` (512 MB, measured). Configurable
+    ///     rather than fixed so a caller — a future low-memory mode, a test — can raise or
+    ///     lower it without editing this type.
+    public init(assets: NativeModelAssets = .resolveDefault(precision: .float16),
+                mlxMemoryLimit: Int = NativeSpeechProvider.defaultMLXMemoryLimit) {
         self.assets = assets
+        self.mlxMemoryLimit = mlxMemoryLimit
     }
 
     /// Loads the model and runs one throwaway synthesis.
@@ -170,6 +205,11 @@ public actor NativeSpeechProvider: SpeechProvider {
 
     private func loadedEngine() throws -> NativeKokoroEngine {
         if let engine { return engine }
+        // Applied once, alongside the model load it protects — not inside `synthesize`,
+        // where it would be re-set (harmlessly, but pointlessly) on every single chunk.
+        // `MLX.Memory.memoryLimit` is process-global state, matching how mlx-swift exposes
+        // it (see `PerformanceEnvelopeTests`, the only other place this repo sets it).
+        MLX.Memory.memoryLimit = mlxMemoryLimit
         let engine = try NativeKokoroEngine(assets: assets)
         self.engine = engine
         modelLoadCount += 1

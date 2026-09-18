@@ -154,6 +154,50 @@ struct NativeSpeechProviderSynthesisTests {
         #expect(await provider.modelLoadCount == 1)
     }
 
+    /// Phase 4: bounding MLX's memory. Unbounded, peak MLX allocation for a single
+    /// ~100-character chunk reaches ~1.7 GB (`printsTheChunkSizeSweep` reproduces this
+    /// figure directly). `NativeSpeechProvider()`'s default constructor now applies a
+    /// 512 MB ceiling (`defaultMLXMemoryLimit`) at model load — this proves that ceiling
+    /// is actually reaching `MLX.Memory.memoryLimit`, not just being stored and ignored.
+    ///
+    /// `Self.shared` (this suite's default-constructed, already-warm provider) stands in
+    /// for the shipping ceiling; a second, freshly-loaded provider constructed with
+    /// `mlxMemoryLimit: .max` stands in for "no ceiling at all". Comparing MLX's own peak
+    /// allocation across the two for an identical chunk is a direct, not inferred, check
+    /// that the ceiling binds.
+    @Test func defaultConstructionActuallyAppliesTheMeasuredMLXMemoryCeiling() async throws {
+        let capped = Self.shared
+        try await capped.prepare()
+        #expect(capped.mlxMemoryLimit == NativeSpeechProvider.defaultMLXMemoryLimit)
+
+        let text = Report.utterance(index: 0, targetCharacters: 100)
+
+        MLX.GPU.resetPeakMemory()
+        _ = try await capped.synthesize(text: text, voice: "af_bella", speed: 1.0)
+        let cappedPeak = MLX.Memory.peakMemory
+
+        let uncapped = NativeSpeechProvider(mlxMemoryLimit: .max)
+        try await uncapped.prepare()
+        MLX.GPU.resetPeakMemory()
+        _ = try await uncapped.synthesize(text: text, voice: "af_bella", speed: 1.0)
+        let uncappedPeak = MLX.Memory.peakMemory
+
+        print("MLX MEMORY CEILING — capped (512 MB) peak \(Report.megabytes(cappedPeak))"
+            + " vs uncapped peak \(Report.megabytes(uncappedPeak))")
+
+        let comparisonMessage = "512 MB ceiling should measurably lower MLX's own peak allocation; "
+            + "capped=\(cappedPeak) bytes, uncapped=\(uncappedPeak) bytes"
+        #expect(cappedPeak < uncappedPeak, "\(comparisonMessage)")
+        // Generous headroom above the 512 MB target itself -- memoryLimit is backpressure
+        // (mlx-swift: "calls to malloc will wait on scheduled tasks if exceeded"), not a
+        // hard cap, so some overshoot is expected and already measured elsewhere
+        // (PerformanceEnvelopeTests' own "512 MB MLX ceiling" row peaks around 900-950 MB
+        // across a whole run). This just rules out the ceiling doing nothing at all.
+        let boundMessage = "capped peak \(Report.megabytes(cappedPeak)) is nowhere near the ~1.7 GB "
+            + "unconstrained figure for a 100-char chunk; the ceiling appears not to be binding"
+        #expect(cappedPeak < 1_200 << 20, "\(boundMessage)")
+    }
+
     @Test func aCancelledTaskDoesNotHandBackAudio() async throws {
         let provider = Self.shared
         try await provider.prepare()

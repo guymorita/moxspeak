@@ -75,7 +75,16 @@ struct PerformanceEnvelopeTests {
 
     /// One provider for the suite. Both tests want a warm engine, and loading the model
     /// twice would only add a wait.
-    static let shared = NativeSpeechProvider()
+    ///
+    /// Explicitly unconstrained (`mlxMemoryLimit: .max`) rather than
+    /// `NativeSpeechProvider()`'s shipping default (`defaultMLXMemoryLimit`, 512 MB, see
+    /// Phase 4). This suite exists to measure what a ceiling costs by applying one itself,
+    /// per row, in `configurations()` below — if the provider's own load already clamped
+    /// the global limit to 512 MB, `configurations()`'s "unconstrained" row would capture
+    /// that 512 MB as its baseline and silently measure "512 MB vs 512 MB" instead of
+    /// "512 MB vs actually unconstrained", which is the whole comparison this table exists
+    /// to report.
+    static let shared = NativeSpeechProvider(mlxMemoryLimit: .max)
 
     /// The one assertion in the suite, and it is deliberately loose.
     ///
