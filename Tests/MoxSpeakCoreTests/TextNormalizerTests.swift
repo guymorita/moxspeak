@@ -213,10 +213,67 @@ private let n = TextNormalizer()
     #expect(n.normalize("The alarm rang at 12:05 then.") == "The alarm rang at twelve oh five then.")
 }
 
-/// Matching "h:mm" alone would find "23:45" inside "1:23:45" and read a stopwatch as a clock.
-@Test func leavesLongerColonRunsAlone() {
+/// Three colon-separated fields is a duration, not a clock time — matching "h:mm" alone
+/// would find "23:45" inside "1:23:45" and read a stopwatch as a clock.
+@Test func expandsHourMinuteSecondAsADuration() {
     #expect(n.normalize("The meeting ran 1:23:45 in total.")
-            == "The meeting ran one:twenty three:forty five in total.")
+            == "The meeting ran one hour twenty three minutes forty five seconds in total.")
+}
+
+/// The defect this was built to fix: the colons used to survive into the phoneme string.
+@Test func expandsHourMinuteSecondDurationWithTwoDigitHour() {
+    #expect(n.normalize("The episode runs 2:04:36 long.")
+            == "The episode runs two hours four minutes thirty six seconds long.")
+}
+
+/// A duration field of zero is dropped rather than spoken.
+@Test func durationDropsZeroValuedFields() {
+    #expect(n.normalize("It finished in 1:00:09 flat.")
+            == "It finished in one hour nine seconds flat.")
+    #expect(n.normalize("The clip is 0:05:00 long.") == "The clip is five minutes long.")
+}
+
+// MARK: - Times with am/pm
+
+/// The defect this was built to fix: "5:45pm" used to phonemize as the non-word "fivepeem"
+/// because the glued "pm" was left for the phonemizer to guess at.
+@Test func expandsClockTimeWithGluedMeridiem() {
+    #expect(n.normalize("Doors open at 5:45pm sharp.") == "Doors open at five forty five p m sharp.")
+}
+
+@Test func expandsClockTimeWithSpacedMeridiem() {
+    #expect(n.normalize("Doors open at 5:45 pm sharp.") == "Doors open at five forty five p m sharp.")
+}
+
+@Test func expandsClockTimeWithDottedMeridiem() {
+    #expect(n.normalize("Doors open at 5:45 p.m. sharp.") == "Doors open at five forty five p m sharp.")
+    #expect(n.normalize("Doors open at 5:45 P.M. sharp.") == "Doors open at five forty five p m sharp.")
+}
+
+/// The defect this was built to fix: a bare hour with no colon was not expanded at all.
+@Test func expandsBareHourWithMeridiem() {
+    #expect(n.normalize("We start at 9am sharp.") == "We start at nine a m sharp.")
+    #expect(n.normalize("We start at 9 am sharp.") == "We start at nine a m sharp.")
+    #expect(n.normalize("We start at 9AM sharp.") == "We start at nine a m sharp.")
+    #expect(n.normalize("We start at 9Am sharp.") == "We start at nine a m sharp.")
+}
+
+@Test func topOfTheHourWithMeridiemOmitsOClock() {
+    #expect(n.normalize("The gate closes at 9:00pm tonight.") == "The gate closes at nine p m tonight.")
+}
+
+/// Ratios and always-on phrases get no special time/duration reading — that part is
+/// deliberately left unhandled, same as before this fix. The colon and slash themselves
+/// survive; only the individual digit runs either side are spelled out by the general
+/// number rule, exactly as they were pre-fix.
+@Test func timeRulesLeaveRatiosAndUnrelatedColonsAlone() {
+    #expect(n.normalize("The odds were 3:1 against.") == "The odds were three:one against.")
+    #expect(n.normalize("Support runs 24/7 always.") == "Support runs twenty four/seven always.")
+}
+
+/// A bare "12:00" reads as a clock time, not a ratio.
+@Test func bareTwelveOhOhReadsAsATime() {
+    #expect(n.normalize("The kitchen closes at 12:00 sharp.") == "The kitchen closes at twelve o'clock sharp.")
 }
 
 // MARK: - Ordinals
@@ -410,6 +467,8 @@ private let n = TextNormalizer()
         "In 2024 we shipped version 3.1.4 of the product.",
         "It costs 50% more, roughly €40 or £35.",
         "The meeting is at 9:30 AM on July 4th, 1776.",
+        "Doors open at 5:45pm and the show runs 2:04:36 long.",
+        "We start at 9am sharp.",
         "Dr. Smith will see you now on St. Andrews Road.",
         "This is a state-of-the-art well-designed device.",
         "The file is 10KB and the drive holds 2TB.",
