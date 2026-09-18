@@ -51,6 +51,11 @@ we need MLX for inference regardless.
    files are another 9 MB for a voice set we do not ship. The code paths are untouched:
    `EnglishG2P(british: true)` still compiles, and would fail at resource load. If British
    voices are ever wanted, copy the four `gb_*` files from upstream's `Resources/`.
+4. **Resource lookups go through `MoxSpeakResourceLocator`** (new file, ours) instead of
+   `Bundle.module` directly — four call sites in `English/Lexicon/DataResourcesUtil.swift`
+   and `English/FallbackNetwork/EnglishFallbackNetwork.swift`. See
+   "Resources inside a signed `.app`" below for why; `Bundle.module` remains the fallback,
+   so nothing changes for `swift test`.
 
 Nothing else was changed. The G2P behaviour is upstream's, bugs included.
 
@@ -95,7 +100,10 @@ would pull in a *second*, unvendored copy of the G2P we just took control of.
 1. **`resources/config.json` relocated.** Upstream declares `.copy("../../Resources/")`,
    reaching outside the target directory. Here the file lives at
    `KokoroSwift/Resources/config.json`; the `Bundle.module` lookup is unchanged.
-2. **`KokoroTTS.phonemize(text:language:)` added** (`TTSEngine/KokoroTTS.swift`). Upstream
+2. **`KokoroConfig`'s resource lookup goes through `MoxSpeakResourceLocator`** (new file,
+   ours) instead of `Bundle.module` directly — one call site. Same reason as MisakiSwift;
+   see "Resources inside a signed `.app`" below.
+3. **`KokoroTTS.phonemize(text:language:)` added** (`TTSEngine/KokoroTTS.swift`). Upstream
    keeps `phonemizeText` private, so there is no way to read the phoneme string without
    running synthesis. G2P is the part of this pipeline most likely to be wrong and a wrong
    pronunciation is invisible in every acoustic metric, so it needs to be inspectable.
@@ -213,3 +221,52 @@ Scripts/build-metallib.sh            # writes .build/debug/ and .build/release/
 ```
 
 An app bundle needs the same file next to its executable, in `Contents/MacOS/`.
+`build-app.sh` puts it there, and signs it *before* the bundle around it: a `.metallib` is
+a Mach-O-ish `MetalLib executable`, so `codesign` treats it as nested code and otherwise
+refuses with "code object is not signed at all".
+
+---
+
+## Resources inside a signed `.app`
+
+SwiftPM generates each resourced target's `Bundle.module` as, in effect:
+
+```swift
+Bundle(path: Bundle.main.bundleURL.appendingPathComponent("MoxSpeak_MisakiSwift.bundle"))
+    ?? Bundle(path: "<absolute path into this machine's .build>")
+```
+
+For an app, `Bundle.main.bundleURL` is `MoxSpeak.app` **itself**, so that first path asks
+for a directory at the root of the bundle, a sibling of `Contents/`. `codesign` will not
+sign that:
+
+```
+MoxSpeak.app: unsealed contents present in the bundle root
+```
+
+and the second path is an absolute `.build` directory baked in at compile time, which
+exists on exactly one machine. Neither can ship.
+
+So `MoxSpeakResourceLocator` (one small file in each of the two resourced vendored
+targets) looks in `Bundle.main.resourceURL` first — `Contents/Resources/` in an app, and
+for a bare `swift build` executable the directory the binary sits in, which is where
+SwiftPM already leaves the bundle. When neither has it (`swift test`, where `Bundle.main`
+is the `.xctest` harness) it falls back to `Bundle.module`, which is what has always
+worked there. `Bundle.module` is only *touched* on that fallback path, deliberately: its
+generated accessor calls `fatalError` when it cannot find the bundle, so reaching for it
+first and recovering afterwards is not an option.
+
+### `Bundle.resourceURL` is base-relative, and MLX cares
+
+`Bundle.resourceURL` returns a URL with a `baseURL` — `Contents/Resources/` *relative to*
+the `.app`. `URL.path` flattens that and looks fine; `URL.path()`, the newer accessor,
+returns only the relative half — and `URL.path()` is what `MLX.loadArrays(url:)` calls.
+The symptom is the process aborting inside a vendored `try!` with
+
+```
+Failed to open file Contents/Resources/Models/kokoro-v1_0-fp16.safetensors
+```
+
+against a bundle where the file is plainly present. Both `MoxSpeakResourceLocator` and
+`NativeModelAssets.bundleModelsDirectory` collapse the base with `.absoluteURL` for that
+reason, and `theBundledModelDirectoryIsAnAbsoluteURLWithNoBaseLeftOnIt` pins it.

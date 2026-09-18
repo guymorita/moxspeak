@@ -61,22 +61,70 @@ public struct NativeModelAssets: Sendable, Equatable {
         voicesDirectory.appendingPathComponent("\(name).safetensors")
     }
 
+    /// Subdirectory of the bundle's resources that holds the weights and `voices/`.
+    /// `MoxSpeak.app/Contents/Resources/Models` in a shipped build.
+    public static let bundleSubdirectory = "Models"
+
+    /// The model directory inside the running bundle, or nil when there isn't one.
+    ///
+    /// This is the shipping path and the reason the app is self-contained: `build-app.sh`
+    /// copies the fp16 weights and `voices/` into `Contents/Resources/Models`, and
+    /// `Bundle.main.resourceURL` finds them wherever the `.app` has been dragged to. No
+    /// path relative to the source tree is involved, so it keeps working on a machine that
+    /// has never seen this repository.
+    ///
+    /// It is also harmless during development. For a bare `swift build` executable
+    /// `Bundle.main.resourceURL` is the directory the binary sits in (`.build/release`),
+    /// which has no `Models` subdirectory, so this returns nil and resolution falls
+    /// through to the checkout. Under `swift test` `Bundle.main` is the `.xctest` harness,
+    /// same story.
+    public static func bundleModelsDirectory(
+        bundle: Bundle = .main,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        // `.absoluteURL` is load-bearing, and was found the hard way. `Bundle.resourceURL`
+        // hands back a *base-relative* URL — "Contents/Resources/" relative to the .app —
+        // and while `URL.path` flattens that, `URL.path()` (the newer accessor, which is
+        // what mlx-swift's `loadArrays(url:)` calls) returns only the relative half. The
+        // symptom was MLX aborting the process with
+        //
+        //     Failed to open file Contents/Resources/Models/kokoro-v1_0-fp16.safetensors
+        //
+        // from a bundle where the file was plainly there. Collapsing the base in here means
+        // every URL derived from this one is absolute, whoever reads it and however.
+        guard let resources = bundle.resourceURL?.absoluteURL else { return nil }
+        let candidate = resources.appendingPathComponent(bundleSubdirectory, isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return nil }
+        return candidate
+    }
+
     /// The default model directory, in precedence order:
     ///
     /// 1. `MOXSPEAK_MODEL_DIR`
-    /// 2. `~/Library/Application Support/MoxSpeak/models` — where a shipped app would
-    ///    keep them
-    /// 3. `<repo>/Models` — where a developer checkout keeps them (gitignored)
+    /// 2. `<bundle>/Contents/Resources/Models` — what a shipped `.app` carries inside it
+    /// 3. `~/Library/Application Support/MoxSpeak/models` — a hand-installed override
+    /// 4. `<repo>/Models` — where a developer checkout keeps them (gitignored)
     ///
-    /// Only 1 is authoritative; 2 and 3 are tried in order and the first that exists wins.
-    /// If neither exists, 2 is returned so the error message names the install location
-    /// rather than someone's checkout.
+    /// Only 1 is authoritative; 2 through 4 are tried in order and the first that exists
+    /// wins. The bundle sits above Application Support deliberately: the app ships with a
+    /// known-good, signed set of weights and that is what it should use, not whatever an
+    /// earlier experiment left in a user directory.
+    ///
+    /// If none exists, 3 is returned so the error message names an install location rather
+    /// than someone's checkout.
     public static func defaultDirectory(
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        bundle: Bundle = .main
     ) -> URL {
         if let override = environment["MOXSPEAK_MODEL_DIR"], !override.isEmpty {
             return URL(fileURLWithPath: (override as NSString).expandingTildeInPath, isDirectory: true)
+        }
+
+        if let bundled = bundleModelsDirectory(bundle: bundle, fileManager: fileManager) {
+            return bundled
         }
 
         let appSupport = fileManager.homeDirectoryForCurrentUser
@@ -108,9 +156,11 @@ public struct NativeModelAssets: Sendable, Equatable {
 
     public static func resolveDefault(
         precision: Precision = .float32,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        bundle: Bundle = .main
     ) -> NativeModelAssets {
-        NativeModelAssets(directory: defaultDirectory(environment: environment), precision: precision)
+        NativeModelAssets(directory: defaultDirectory(environment: environment, bundle: bundle),
+                          precision: precision)
     }
 
     /// Throws unless the weight file for this precision is present. Voices are checked

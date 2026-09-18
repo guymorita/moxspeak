@@ -123,3 +123,106 @@ import MoxSpeakCore
     let data = NativeKokoroEngine.pcm16(from: [Float](repeating: 0, count: 24000))
     #expect(Double(data.count) / Double(AudioFormat.kokoroPCM.bytesPerSecond) == 1.0)
 }
+
+// MARK: - Resolving out of the app bundle
+//
+// Phase 5: the shipped `.app` carries the weights and voices in
+// `Contents/Resources/Models`, and the engine has to find them there rather than through
+// any path relative to this source tree. These use a `Bundle` built over a temporary
+// directory — for a directory that is not a wrapped `.app`, `Bundle.resourceURL` is the
+// directory itself, which is also exactly the shape of a plain `swift build` output
+// directory, so the same test covers both.
+
+/// Makes a throwaway directory usable as a `Bundle`, optionally containing `Models/`.
+private func temporaryBundle(withModels: Bool) throws -> (Bundle, URL) {
+    let root = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    if withModels {
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Models", isDirectory: true),
+            withIntermediateDirectories: true)
+    }
+    guard let bundle = Bundle(url: root) else {
+        throw NativeModelAssets.ResolutionError.directoryMissing(root)
+    }
+    return (bundle, root)
+}
+
+@Test func modelsInsideTheBundleAreFoundThroughTheBundleNotTheSourceTree() throws {
+    let (bundle, root) = try temporaryBundle(withModels: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let found = try #require(NativeModelAssets.bundleModelsDirectory(bundle: bundle))
+    #expect(found.standardizedFileURL.path
+            == root.appendingPathComponent("Models").standardizedFileURL.path)
+}
+
+@Test func aBundleWithoutModelsResolvesToNothingRatherThanAPathThatDoesNotExist() throws {
+    let (bundle, root) = try temporaryBundle(withModels: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    #expect(NativeModelAssets.bundleModelsDirectory(bundle: bundle) == nil)
+}
+
+@Test func aFileNamedModelsIsNotAModelDirectory() throws {
+    let (bundle, root) = try temporaryBundle(withModels: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data().write(to: root.appendingPathComponent("Models"))
+
+    // `fileExists(atPath:)` alone would say yes here and resolution would then fail deep
+    // inside the loader with a confusing error, so the directory check is load-bearing.
+    #expect(NativeModelAssets.bundleModelsDirectory(bundle: bundle) == nil)
+}
+
+@Test func theBundleOutranksBothApplicationSupportAndTheCheckout() throws {
+    let (bundle, root) = try temporaryBundle(withModels: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    // No environment override, and the developer checkout's Models/ may well exist on this
+    // machine — the point of the assertion is that the bundle beats it anyway.
+    let resolved = NativeModelAssets.defaultDirectory(environment: [:], bundle: bundle)
+    #expect(resolved.standardizedFileURL.path
+            == root.appendingPathComponent("Models").standardizedFileURL.path)
+}
+
+@Test func theEnvironmentOverrideStillOutranksTheBundle() throws {
+    let (bundle, root) = try temporaryBundle(withModels: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let resolved = NativeModelAssets.defaultDirectory(
+        environment: ["MOXSPEAK_MODEL_DIR": "/somewhere/else"], bundle: bundle)
+    #expect(resolved.path == "/somewhere/else")
+}
+
+@Test func resolveDefaultCarriesTheBundleThroughToTheAssets() throws {
+    let (bundle, root) = try temporaryBundle(withModels: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let assets = NativeModelAssets.resolveDefault(precision: .float16, environment: [:], bundle: bundle)
+    #expect(assets.weightsURL.standardizedFileURL.path
+            == root.appendingPathComponent("Models/kokoro-v1_0-fp16.safetensors")
+                   .standardizedFileURL.path)
+}
+
+@Test func theBundledModelDirectoryIsAnAbsoluteURLWithNoBaseLeftOnIt() throws {
+    let (bundle, root) = try temporaryBundle(withModels: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let found = try #require(NativeModelAssets.bundleModelsDirectory(bundle: bundle))
+
+    // `Bundle.resourceURL` is base-relative. `URL.path` hides that; `URL.path()` does not,
+    // and `URL.path()` is what mlx-swift's loader calls — so a URL that still carries a
+    // base reaches MLX as "Contents/Resources/Models/kokoro-v1_0-fp16.safetensors" and the
+    // process aborts inside `try! MLX.loadArrays`. Both accessors must agree, and both
+    // must be absolute.
+    #expect(found.baseURL == nil)
+    #expect(found.path().hasPrefix("/"))
+    // Same path from both accessors. (`path()` keeps the trailing slash a directory URL
+    // carries and `path` drops it; that difference is cosmetic, a missing prefix is not.)
+    #expect(found.path().hasPrefix(found.path))
+
+    let weights = NativeModelAssets(directory: found, precision: .float16).weightsURL
+    #expect(weights.path().hasPrefix("/"))
+    #expect(weights.path().hasSuffix("/Models/kokoro-v1_0-fp16.safetensors"))
+}
