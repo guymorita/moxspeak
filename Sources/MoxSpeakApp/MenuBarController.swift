@@ -30,7 +30,10 @@ final class MenuBarController: NSObject {
         var quit: @MainActor () -> Void
     }
 
-    static let rates: [Float] = [0.75, 1.0, 1.25, 1.5, 2.0]
+    /// The speeds the app can be in. `nonisolated` because this list is the definition
+    /// of a valid speed, and `Settings` has to be able to check a restored one against it
+    /// without touching the main actor.
+    nonisolated static let rates: [Float] = [0.75, 1.0, 1.25, 1.5, 2.0]
 
     private let actions: Actions
     private let statusItem: NSStatusItem

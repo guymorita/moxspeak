@@ -28,8 +28,13 @@ final class AppController {
     private var playback: Task<Void, Never>?
 
     private var health = EngineHealth()
-    private var voice = "af_bella"
-    private var rate: Float = 1.0
+
+    /// Persisted across launches. The values below are already the *resolved* ones —
+    /// see `Settings` for why what was stored and what is safe to use are not the same
+    /// question.
+    private let settings: Settings
+    private var voice: String
+    private var rate: Float
 
     private var isPlaying = false
     /// Set when something went wrong with the current utterance, cleared when a new one
@@ -39,10 +44,19 @@ final class AppController {
     private var idleNote = "Ready"
     private var hotkeyWarning: String?
 
-    init(port: Int) {
+    init(port: Int, settings: Settings = Settings()) {
         self.port = port
         self.provider = OpenAICompatibleProvider(config: .kokoroLocal(port: port))
         self.session = SpeechSession(provider: provider)
+        self.settings = settings
+
+        // The voice cannot be checked against the engine's list yet — nothing has been
+        // asked of the engine at this point — so it is resolved again in `loadVoices`
+        // once there is a list to check it against. The speed can be settled here and
+        // for good: the menu's five speeds are known at compile time.
+        self.voice = Settings.resolveVoice(stored: settings.storedVoice, available: [])
+        self.rate = Settings.resolveRate(stored: settings.storedRate,
+                                         offered: MenuBarController.rates)
     }
 
     // MARK: - Launch
@@ -69,6 +83,9 @@ final class AppController {
         refresh()
         Task { await loadVoices() }
         AppLog.write("app: started, talking to 127.0.0.1:\(port)")
+        AppLog.write("settings: restored voice \(voice) at \(rate)× "
+                     + "(stored: voice=\(settings.storedVoice ?? "none"), "
+                     + "speed=\(settings.storedRate.map { "\($0)" } ?? "none"))")
     }
 
     private func installHotkeys() {
@@ -103,8 +120,15 @@ final class AppController {
         do {
             let voices = try await provider.listVoices()
             health.markReachable()
-            if !voices.contains(where: { $0.id == voice }), let first = voices.first {
-                voice = first.id
+            let resolved = Settings.resolveVoice(stored: voice, available: voices.map(\.id))
+            if resolved != voice {
+                // Not written back. The stored preference is left exactly as it is, so a
+                // voice that disappears when someone prunes the engine's model directory
+                // comes back by itself when they put it back. Overwriting here would
+                // quietly make a temporary absence permanent.
+                AppLog.write("settings: stored voice \(voice) is not in the engine's "
+                             + "list — using \(resolved) this session")
+                voice = resolved
             }
             menuBar?.setVoices(voices, selected: voice, note: nil)
             AppLog.write("voices: loaded \(voices.count)")
@@ -197,6 +221,7 @@ final class AppController {
 
     private func selectVoice(_ id: String) {
         voice = id
+        settings.storedVoice = id
         menuBar?.setSelectedVoice(id)
         // Synthesis of the current utterance is already in flight; swapping voices
         // mid-sentence would splice two speakers together, so this takes effect next time
@@ -209,6 +234,7 @@ final class AppController {
 
     private func selectRate(_ value: Float) {
         rate = value
+        settings.storedRate = value
         // TimePitch applies this instantly and pitch-corrected, so the current utterance
         // changes speed under the user's ear with no re-synthesis. That immediacy is the
         // whole reason speed lives on playback rather than on the request.
