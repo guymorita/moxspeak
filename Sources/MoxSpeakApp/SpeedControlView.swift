@@ -50,7 +50,7 @@ final class SpeedControlView: NSView {
 
     /// Wide enough to be the widest thing in the menu itself, so this row defines the
     /// menu's width rather than hoping it is already at least as wide as "Speak
-    /// Clipboard  (⌥⇧S reads the selection)". A view narrower than the menu (sized by
+    /// Clipboard  (⌃⌥S reads the selection)". A view narrower than the menu (sized by
     /// some other item) does not get stretched to fit — it just leaves a gap on its own
     /// row, which was the other half of what looked wrong here.
     private static let width: CGFloat = 324

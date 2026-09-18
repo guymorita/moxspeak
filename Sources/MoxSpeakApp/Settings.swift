@@ -1,8 +1,8 @@
 import Foundation
 import MoxSpeakCore
 
-/// The three things the app remembers between launches: the chosen engine, the chosen
-/// voice and the chosen speed.
+/// What the app remembers between launches: the chosen engine, voice and speed, and the
+/// three global keyboard shortcuts.
 ///
 /// Deliberately two halves. The *resolving* half is pure — it takes what was read off
 /// disk plus what is actually available right now, and returns something safe to use.
@@ -39,6 +39,7 @@ struct Settings {
     /// that they are all gone — and a key added to `Key` without being added here would
     /// be a preference that silently survives a reset.
     static let allKeys = [Key.voice, Key.rate, Key.engine]
+                       + HotkeyAction.allCases.map(\.settingsKey)
 
     /// `.standard` is the bundle identifier's own suite — `com.moxspeak.menubar` — which
     /// macOS manages. No suite name, no plist path, nothing this app has to create,
@@ -109,6 +110,21 @@ struct Settings {
         }
     }
 
+    /// One hotkey exactly as it was written, or nil when nothing has ever been saved.
+    ///
+    /// A `String?` for the same reason `storedEngine` is: what is on disk is a rumour.
+    /// It may be from a format this version does not know, hand-edited, or — the case
+    /// this whole feature exists for — a combination macOS stopped delivering in 2024.
+    /// Decoding and judging it is `resolveHotkey`'s job.
+    func storedHotkey(_ action: HotkeyAction) -> String? {
+        defaults.string(forKey: action.settingsKey)
+    }
+
+    func setStoredHotkey(_ value: String?, for action: HotkeyAction) {
+        if let value { defaults.set(value, forKey: action.settingsKey) }
+        else { defaults.removeObject(forKey: action.settingsKey) }
+    }
+
     // MARK: - Resolving (pure)
 
     /// Picks the voice to actually use, given what was stored and what the engine offers.
@@ -166,5 +182,67 @@ struct Settings {
 
         let range = PlaybackEngine.rateRange
         return min(max(stored, range.lowerBound), range.upperBound)
+    }
+
+    /// What a stored hotkey resolves to, and what should be said and written because of
+    /// it.
+    struct HotkeyResolution: Equatable {
+        /// The combination to actually register. Always usable — `resolveHotkey` never
+        /// returns one macOS would refuse to deliver.
+        var hotkey: Hotkey
+        /// One line for the log, or nil when nothing happened worth mentioning. A binding
+        /// must never change under a user without a trace, so every path that does not
+        /// hand back exactly what was stored fills this in.
+        var note: String?
+        /// True when what is on disk no longer matches what the app is using, so the
+        /// caller should write the resolved value back. A migration that is not persisted
+        /// is a migration that has to be re-explained on every launch — and, worse, a
+        /// preferences file that still holds a dead shortcut.
+        var shouldRestore: Bool
+    }
+
+    /// Picks the shortcut to actually register, given what was stored.
+    ///
+    /// The same shape as `resolveVoice` and `resolveRate` — stored value in, safe value
+    /// out — with one extra job those two do not have: a stored value here can be
+    /// *well-formed and still dead*. ⌥⇧S parses perfectly and has been unable to fire
+    /// since macOS 15 (see `Hotkey`). Handing it back would leave the user on a shortcut
+    /// that cannot work, with a log that says everything is fine.
+    ///
+    /// Four cases, in order:
+    ///
+    /// 1. **Nothing stored.** The default. Silent — this is a first launch, not an event.
+    /// 2. **Stored, but not readable.** A future version's format, or a hand-edit. The
+    ///    default, and say so; the alternative is registering nonsense.
+    /// 3. **Stored, readable, and macOS will not deliver it.** Move it: the three shipped
+    ///    defaults become the three new defaults, anything else keeps its key and gains
+    ///    Control (`Hotkey.workingEquivalent`). Say exactly what moved and why.
+    /// 4. **Stored, readable, usable.** Exactly what was stored. Silent.
+    static func resolveHotkey(stored: String?, action: HotkeyAction) -> HotkeyResolution {
+        let fallback = action.defaultHotkey
+
+        let trimmed = stored?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else {
+            return HotkeyResolution(hotkey: fallback, note: nil, shouldRestore: false)
+        }
+
+        guard let candidate = Hotkey(storageString: trimmed) else {
+            return HotkeyResolution(
+                hotkey: fallback,
+                note: "the stored \(action.logName) could not be read (\"\(trimmed)\") — "
+                    + "using \(fallback.label)",
+                shouldRestore: true)
+        }
+
+        guard let reason = candidate.rejection else {
+            return HotkeyResolution(hotkey: candidate, note: nil, shouldRestore: false)
+        }
+
+        let replacement = candidate.workingEquivalent(for: action) ?? fallback
+        return HotkeyResolution(
+            hotkey: replacement,
+            note: "the stored \(action.logName) \(candidate.label) cannot work — "
+                + "\(reason.logReason) — moved to \(replacement.label)",
+            shouldRestore: true)
     }
 }

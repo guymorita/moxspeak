@@ -45,9 +45,9 @@
 # signature has no stable identity for macOS to pin an approval to, so TCC pins
 # the code hash instead. Every rebuild changes that hash, which silently voids
 # the approval: System Settings goes on showing MoxSpeak ticked while
-# AXIsProcessTrusted() returns false and ⌥⇧S quietly reads the clipboard. That
-# is precisely the kind of looks-fine-isn't failure this project exists to
-# avoid, so the script says so out loud rather than leaving it to be
+# AXIsProcessTrusted() returns false and the speak shortcut quietly reads the
+# clipboard. That is precisely the kind of looks-fine-isn't failure this project
+# exists to avoid, so the script says so out loud rather than leaving it to be
 # rediscovered.
 
 set -euo pipefail
@@ -257,8 +257,8 @@ echo "Logs:    ~/Library/Logs/MoxSpeak.log"
 echo
 echo "Note: this rebuild changed the app's code hash, which voids any existing"
 echo "      Accessibility approval — System Settings will still show MoxSpeak"
-echo "      ticked, but select-to-speak will be off and ⌥⇧S will read the"
-echo "      clipboard. If you had it enabled, re-approve it:"
+echo "      ticked, but select-to-speak will be off and the speak shortcut"
+echo "      will read the clipboard. If you had it enabled, re-approve it:"
 echo
 echo "        tccutil reset Accessibility ${BUNDLE_ID}"
 echo

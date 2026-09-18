@@ -160,7 +160,8 @@ enum ClipboardFreshness {
 ///   below applies to it.
 ///
 /// **A granted permission must not make the app confidently wrong.** With Accessibility
-/// on, ⌥⇧S means "read what I selected". The old code fell back to the clipboard whenever
+/// on, the speak shortcut means "read what I selected". The old code fell back to the
+/// clipboard whenever
 /// the selection read came back empty, which produced the worst failure this project has:
 /// text the user copied twenty minutes ago, spoken with complete confidence, with nothing
 /// on screen to say why. The fix is not a better guess, it is a real answer — tier 2 asks
@@ -303,7 +304,7 @@ enum SelectionReader {
             // worth keeping honest in tests.
             //
             // Freshness is ignored too, and deliberately. With no permission the
-            // clipboard is not a fallback, it is the entire feature: ⌥⇧S means "speak
+            // clipboard is not a fallback, it is the entire feature: the shortcut means "speak
             // what I copied" and always has. Applying the freshness rule here would make
             // the second press on the same text silent, which would be a new bug rather
             // than a fix. Nothing is recorded either, for the same reason — there is no
