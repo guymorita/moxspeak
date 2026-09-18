@@ -94,6 +94,7 @@ final class AppController {
             selectRate: { [weak self] in self?.selectRate($0) },
             selectEngine: { [weak self] in self?.selectEngine($0) },
             enableSelectToSpeak: { [weak self] in self?.enableSelectToSpeak() },
+            reset: { [weak self] in self?.resetEverything() },
             menuWillOpen: { [weak self] in self?.refreshSelectToSpeak() },
             quit: { NSApplication.shared.terminate(nil) }
         ))
@@ -170,7 +171,11 @@ final class AppController {
     /// were synthesized by the engine being replaced, and the two engines differ in voice
     /// inventory, chunk size and prosody; letting the tail play would mean the app is
     /// audibly using an engine the menu says it is not.
-    private func selectEngine(_ choice: EngineChoice) {
+    /// `persist: false` is for the one caller that must not write anything back: a reset
+    /// has just emptied the preferences domain, and storing the engine it is switching
+    /// *to* would put the first key straight back into a domain the user asked to be
+    /// empty. The switch itself is identical either way.
+    private func selectEngine(_ choice: EngineChoice, persist: Bool = true) {
         guard choice != engineChoice else { return }
 
         let wasPlaying = isPlaying
@@ -178,7 +183,7 @@ final class AppController {
         if wasPlaying { nowPlaying.clear() }
 
         engineChoice = choice
-        settings.storedEngine = choice.rawValue
+        if persist { settings.storedEngine = choice.rawValue }
         runtime = EngineRuntime(choice: choice, port: port)
         // Neither what counts as slow nor anything measured about the old engine carries
         // over. Timings from a 2-second server say nothing about a 0.35-second one.
@@ -424,6 +429,87 @@ final class AppController {
         // The grant lands whenever the user gets round to it, and macOS sends no
         // notification when it does. Nothing here polls: the next menu open re-checks,
         // and so does the next ⌥⇧S.
+    }
+
+    // MARK: - Reset
+
+    /// Erases the two things MoxSpeak leaves outside its own bundle — the preferences
+    /// domain and the log — and puts the running app back to how it starts.
+    ///
+    /// `Reset` documents exactly what those two are, why they are the only two, and the
+    /// one thing this cannot take back (the Accessibility approval, which belongs to
+    /// macOS and not to us). Confirmed before anything is touched: it is irreversible,
+    /// everything it removes was set by hand, and it sits one slip above "Quit MoxSpeak".
+    private func resetEverything() {
+        guard confirmReset() else {
+            AppLog.write("reset: the user cancelled — nothing was touched")
+            return
+        }
+        AppLog.write("reset: erasing preferences domain "
+                     + "\(settings.domain ?? "(none — running without a bundle)") and this log")
+
+        let wasPlaying = isPlaying
+        teardownPlayback()
+        if wasPlaying { nowPlaying.clear() }
+
+        // Logging stops *before* the file is removed, and stays stopped for the rest of
+        // this launch. `applicationWillTerminate` writes `terminate`, so a log deleted
+        // while logging is still on is a log that reappears the moment the user quits —
+        // leaving a file behind on a machine they have just been told is clean.
+        AppLog.stopLogging()
+        let log = Reset.eraseFile(at: AppLog.fileURL)
+        let preferences = Reset.erasePreferences(in: settings.store, domain: settings.domain)
+        let outcome = Reset.Outcome(preferencesCleared: preferences.cleared,
+                                    leftoverKeys: preferences.leftoverKeys,
+                                    logCleared: log.cleared,
+                                    logProblem: log.problem)
+
+        // First-launch state in memory as well as on disk. Clearing the plist while the
+        // running app carried on at 1.25× in am_michael would be a reset the user cannot
+        // see — and the next voice or speed change would write those same values back
+        // into the domain they just emptied.
+        rate = Settings.resolveRate(stored: nil, offered: MenuBarController.rates)
+        voice = Settings.resolveVoice(stored: nil, available: [])
+        menuBar?.setSelectedRate(rate)
+        lastError = nil
+        engineWarning = nil
+
+        if engineChoice != Settings.defaultEngine {
+            // Persisting nothing: this is the engine a first launch picks anyway, and
+            // writing it would put the first key straight back into an empty domain.
+            // Reloads the voice list and warms the engine up as part of the switch.
+            selectEngine(Settings.defaultEngine, persist: false)
+        } else {
+            menuBar?.setVoices([], selected: voice, note: "Loading voices…")
+            beginEngine()
+        }
+
+        // After the engine switch, which sets its own idle note.
+        idleNote = outcome.summary
+        menuBar?.flash(outcome.isClean ? "Reset — back to first-launch settings"
+                                       : "Reset was incomplete — see the menu",
+                       seconds: 5)
+        refresh()
+    }
+
+    /// The confirmation, and the only window this app ever puts on screen.
+    ///
+    /// Two deliberate choices. "Cancel" is added *first*, which in an `NSAlert` makes it
+    /// the rightmost, default, Return-activated button and leaves "Reset" beside it — the
+    /// safe action is what a dialog dismissed on reflex performs, and Escape still cancels
+    /// because the button is titled "Cancel". And `NSApp.activate()`, because an accessory
+    /// app is not frontmost: without it the alert opens behind whatever the user was
+    /// reading and looks like nothing happened.
+    private func confirmReset() -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = Reset.confirmationTitle
+        alert.informativeText = Reset.confirmationDetail
+        alert.addButton(withTitle: Reset.cancelButton)
+        alert.addButton(withTitle: Reset.confirmButton)
+
+        NSApp.activate()
+        return alert.runModal() == .alertSecondButtonReturn
     }
 
     // MARK: - Playback

@@ -35,14 +35,34 @@ struct Settings {
         static let engine = "engine"
     }
 
+    /// Every key this app writes, in one place, because `Reset` has to be able to check
+    /// that they are all gone — and a key added to `Key` without being added here would
+    /// be a preference that silently survives a reset.
+    static let allKeys = [Key.voice, Key.rate, Key.engine]
+
     /// `.standard` is the bundle identifier's own suite — `com.moxspeak.menubar` — which
     /// macOS manages. No suite name, no plist path, nothing this app has to create,
     /// migrate or clean up.
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    /// The name of the domain `defaults` writes into — the bundle identifier for
+    /// `.standard`, and nil for a binary run straight out of `.build`, which has no
+    /// Info.plist to take one from.
+    ///
+    /// Carried here rather than looked up at the point of use so that `Reset` empties the
+    /// same domain these values were written to. A `Settings` on a throwaway suite (every
+    /// test) and a `Settings` on `.standard` must each be erasable, and only the thing
+    /// holding the store knows which is which.
+    let domain: String?
+
+    init(defaults: UserDefaults = .standard, domain: String? = Bundle.main.bundleIdentifier) {
         self.defaults = defaults
+        self.domain = domain
     }
+
+    /// The store behind these settings. Exposed for `Reset`, which has to empty the same
+    /// `UserDefaults` this writes to rather than assume `.standard`.
+    var store: UserDefaults { defaults }
 
     // MARK: - Storing
 

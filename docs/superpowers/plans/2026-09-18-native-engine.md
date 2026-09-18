@@ -378,11 +378,38 @@ Details, including the unreachable-server transcript, in `.superpowers/phase6-re
 
 ---
 
-## Phase 7 — Clean uninstall
+## Phase 7 — Clean uninstall ✅ *(done 2026-09-18)*
 
-Preferences and the log are the only things outside the bundle. Add a menu item that clears both, so removing MoxSpeak leaves nothing behind. Document what it touches.
+**"Reset MoxSpeak…"**, beside Quit, behind a confirmation. It empties the preferences
+domain and deletes `~/Library/Logs/MoxSpeak.log` — the only two things MoxSpeak leaves
+outside its own bundle, because everything the engine needs ships inside the `.app`. 299
+tests.
 
-**Done when:** the item empties the defaults domain and the log, and the app returns to first-launch behaviour.
+Measured on a copy of the bundle given its own identifier, so nothing else could write
+into the domain while it was watched: afterwards `defaults read` answers *does not exist*,
+the log is gone, and **42 bytes** survive — an empty `{}` plist that `cfprefsd` owns and
+keeps. That is the floor for any macOS app that has ever stored a preference.
+
+**The log had to be silenced, not merely deleted.** `applicationWillTerminate` writes
+`terminate`, so a log deleted while logging was still on would reappear the moment the user
+quit — a file left behind on a machine they had just been told was clean.
+`AppLog.stopLogging()` runs *before* the delete and stays in force for the rest of the
+launch. Confirmed live: the reset app spoke, quit, and appended nothing.
+
+**Honest about the one thing it cannot do.** The Accessibility approval behind
+select-to-speak belongs to macOS's TCC database, keyed to the app's signing identity, and
+is not revocable by the app it was granted to. The confirmation names it and says who
+removes it (System Settings → Privacy & Security → Accessibility) rather than implying a
+clean slate. A test pins that wording, so it cannot quietly drift into a promise we
+cannot keep.
+
+Also verified live, driving the running build by pid: **Cancel touches nothing** (it logs
+`reset: the user cancelled — nothing was touched`), and the running app returns to
+first-launch behaviour without a restart — HTTP/`am_michael`/1.25× became Built
+in/`af_bella`/1×, 46 voices, in the same process.
+
+**Done when:** the item empties the defaults domain and the log, and the app returns to
+first-launch behaviour. ✅
 
 ---
 

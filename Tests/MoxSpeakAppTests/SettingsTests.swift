@@ -135,6 +135,13 @@ private let offered = MenuBarController.rates  // 0.75, 1.0, 1.25, 1.5, 2.0
 /// through the same round trip, and two copies of a throwaway-suite helper is how one of
 /// them ends up not cleaning up after itself.
 func withTemporaryDefaults(_ body: (UserDefaults) -> Void) {
+    withTemporaryDefaults { defaults, _ in body(defaults) }
+}
+
+/// The same thing, plus the suite's name. `ResetTests` needs it: emptying a domain means
+/// naming it, `UserDefaults` will not say what it was opened as, and a test that guessed
+/// would be checking a different domain from the one it wrote to.
+func withTemporaryDefaults(_ body: (UserDefaults, String) -> Void) {
     let name = "com.moxspeak.tests.\(UUID().uuidString)"
     guard let defaults = UserDefaults(suiteName: name) else {
         Issue.record("could not open a temporary UserDefaults suite")
@@ -144,5 +151,5 @@ func withTemporaryDefaults(_ body: (UserDefaults) -> Void) {
         defaults.removePersistentDomain(forName: name)
         UserDefaults.standard.removeSuite(named: name)
     }
-    body(defaults)
+    body(defaults, name)
 }

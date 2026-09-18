@@ -29,6 +29,9 @@ final class MenuBarController: NSObject {
         var selectRate: @MainActor (Float) -> Void
         var selectEngine: @MainActor (EngineChoice) -> Void
         var enableSelectToSpeak: @MainActor () -> Void
+        /// Erase the two things MoxSpeak leaves outside its own bundle. Destructive, and
+        /// confirmed by the controller before anything is touched — see `Reset`.
+        var reset: @MainActor () -> Void
         /// Fired every time the menu is about to appear. The controller uses it to
         /// re-read state that can change behind the app's back — Accessibility, which
         /// the user can grant or revoke in System Settings at any moment.
@@ -55,6 +58,7 @@ final class MenuBarController: NSObject {
     private let engineItem = NSMenuItem()
     private let warningItem = NSMenuItem()
     private let selectToSpeakItem = NSMenuItem()
+    private let resetItem = NSMenuItem()
 
     /// Guards the transient flash message: a later flash must not be wiped by an earlier
     /// one's expiry.
@@ -132,6 +136,17 @@ final class MenuBarController: NSObject {
         menu.addItem(engineItem)
 
         menu.addItem(.separator())
+
+        // Beside Quit, because it belongs to the same moment: the user is finished with
+        // MoxSpeak. No key equivalent — a destructive item is not something to arrive at
+        // by muscle memory, and the ellipsis promises the confirmation that `Reset`
+        // requires.
+        resetItem.title = Reset.menuTitle
+        resetItem.toolTip = Reset.menuDetail
+        resetItem.action = #selector(reset)
+        resetItem.target = self
+        resetItem.isEnabled = true
+        menu.addItem(resetItem)
 
         let quitItem = NSMenuItem(title: "Quit MoxSpeak", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
@@ -351,6 +366,7 @@ final class MenuBarController: NSObject {
     @objc private func enableSelectToSpeak() { actions.enableSelectToSpeak() }
     @objc private func togglePause() { actions.togglePause() }
     @objc private func stop() { actions.stop() }
+    @objc private func reset() { actions.reset() }
     @objc private func quit() { actions.quit() }
 
     @objc private func selectVoice(_ sender: NSMenuItem) {
