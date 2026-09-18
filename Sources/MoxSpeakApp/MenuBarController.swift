@@ -60,6 +60,11 @@ final class MenuBarController: NSObject {
     /// one's expiry.
     private var flashToken = 0
 
+    /// The last voice list pushed in, kept so `setSelectedVoice` can rebuild the submenu
+    /// around a new choice without asking the engine for the list a second time.
+    private var lastVoices: [Voice] = []
+    private var lastNote: String?
+
     init(actions: Actions) {
         self.actions = actions
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -226,10 +231,24 @@ final class MenuBarController: NSObject {
 
     /// Replaces the voice submenu.
     ///
+    /// The list arrives from the engine as bare identifiers — `af_bella`, `am_michael` —
+    /// and is handed to `VoiceCatalog` to become names, accents and a shape. Everything
+    /// about *what the menu says and how it is arranged* lives there, where it can be
+    /// tested; what is left here is turning four node kinds into `NSMenuItem`s.
+    ///
+    /// Every row is a plain `NSMenuItem`. That is a deliberate constraint rather than a
+    /// coincidence: a plain item gets its text inset from AppKit and lines up with
+    /// "Voice" and "Speak Clipboard" for free, where a custom view has to measure and
+    /// reproduce that inset by hand (see the note at the top of `SpeedControlView` about
+    /// how that went the first time).
+    ///
     /// `note` is shown instead of the list when there is no list — and it says *why*
     /// there is no list. An empty "Voice" submenu would be the app failing silently at
     /// the exact moment the engine is unreachable.
     func setVoices(_ voices: [Voice], selected: String, note: String?) {
+        lastVoices = voices
+        lastNote = note
+
         let submenu = NSMenu()
         submenu.autoenablesItems = false
 
@@ -238,18 +257,48 @@ final class MenuBarController: NSObject {
             item.isEnabled = false
             submenu.addItem(item)
         } else {
-            for voice in voices {
-                let item = NSMenuItem(title: voice.name,
+            let nodes = VoiceCatalog.menu(available: voices.map(\.id), current: selected)
+            add(nodes, to: submenu, selected: selected)
+        }
+        voiceItem.submenu = submenu
+        // Named on the parent row, exactly as the engine is. "Which voice am I on" is a
+        // question the menu should answer before it is opened, not after a submenu is
+        // hunted through for a checkmark.
+        voiceItem.title = "Voice: \(VoiceCatalog.shortName(for: selected))"
+    }
+
+    private func add(_ nodes: [VoiceCatalog.Node], to menu: NSMenu, selected: String) {
+        for node in nodes {
+            switch node {
+            case .separator:
+                menu.addItem(.separator())
+
+            case .header(let text):
+                let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                menu.addItem(item)
+
+            case .voice(let id, let title, let tooltip):
+                let item = NSMenuItem(title: title,
                                       action: #selector(selectVoice(_:)),
                                       keyEquivalent: "")
                 item.target = self
                 item.isEnabled = true
-                item.representedObject = voice.id as NSString
-                item.state = (voice.id == selected) ? .on : .off
-                submenu.addItem(item)
+                item.toolTip = tooltip
+                item.representedObject = id as NSString
+                item.state = (id == selected) ? .on : .off
+                menu.addItem(item)
+
+            case .group(let title, let children):
+                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                item.isEnabled = true
+                let child = NSMenu()
+                child.autoenablesItems = false
+                add(children, to: child, selected: selected)
+                item.submenu = child
+                menu.addItem(item)
             }
         }
-        voiceItem.submenu = submenu
     }
 
     /// Replaces the engine submenu and names the current choice in the parent row.
@@ -284,10 +333,20 @@ final class MenuBarController: NSObject {
         engineChoiceItem.title = "Engine: \(choice.shortName)"
     }
 
+    /// Moves the tick — and, when there is a list, rebuilds the submenu around the new
+    /// choice.
+    ///
+    /// Rebuilding rather than flipping checkmarks in place, because *which rows exist*
+    /// depends on the selection and not only on which one is ticked: a voice outside the
+    /// featured set is pinned to the top of the menu under "Current", and that pin has to
+    /// move with the user. Safe to do here — choosing a menu item dismisses the menu, so
+    /// nothing is being replaced under the cursor.
     func setSelectedVoice(_ id: String) {
-        for item in voiceItem.submenu?.items ?? [] {
-            item.state = ((item.representedObject as? NSString) as String? == id) ? .on : .off
+        guard lastVoices.isEmpty else {
+            setVoices(lastVoices, selected: id, note: lastNote)
+            return
         }
+        voiceItem.title = "Voice: \(VoiceCatalog.shortName(for: id))"
     }
 
     /// Shows — and offers — the state of select-to-speak.
