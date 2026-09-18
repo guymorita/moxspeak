@@ -283,24 +283,46 @@ enum HotkeyAction: String, CaseIterable, Sendable {
     case pause
     case stop
 
-    /// ⌃⌥ throughout, and the letters are the ones MoxSpeak has always used.
+    /// ⌃⌥S, ⌃⌥C, ⌃⌥X — three keys under one left hand, chosen against a real list of
+    /// what was already taken.
     ///
-    /// Control-Option rather than Command-anything: the combination has to contain
-    /// Control or Command (see `Hotkey.rejection`), and ⌘⌥S / ⌘⌥Space / ⌘⌥. walk into far
-    /// more existing app shortcuts than ⌃⌥ does — ⌘⌥ is heavily used by browsers and
-    /// editors, while ⌃⌥ is comparatively empty on a stock Mac. Keeping S, Space and .
-    /// means the only thing that changes in the user's hand is which modifier the pinky
-    /// is on.
+    /// **Why Control-Option.** The combination has to contain Control or Command (see
+    /// `Hotkey.rejection`). ⌘⌥ is heavily used by browsers and editors; ⌃⌥ is close to
+    /// empty on a stock Mac. So ⌃⌥ throughout.
+    ///
+    /// **Why one hand, and which hand.** Playback controls get pressed while the other
+    /// hand is on the trackpad, scrolling the thing being read. A shortcut that needs two
+    /// hands is a shortcut that interrupts reading to use. With ⌃ under the pinky and ⌥
+    /// under the ring finger, the index and middle fingers cover the left half of the
+    /// keyboard, so the key has to live there.
+    ///
+    /// **Why these three keys.** S is Speak and was already in muscle memory. X is the
+    /// Mac's cancel key everywhere else, and Stop is the destructive one — it throws away
+    /// the queue — so it gets the key that already means "discard this". C sits between
+    /// them in the hand's travel and is the most reachable key nothing else claims. All
+    /// three sit in adjacent columns: S on the home row, X directly below it, C down and
+    /// one to the right.
+    ///
+    /// **What they had to avoid.** The first attempt used Space and Period, and both were
+    /// occupied. ⌃⌥Space is the macOS default for Select Next Input Source (symbolic
+    /// hotkey 61) — shipped by Apple, so it is taken on every Mac that has not turned it
+    /// off. ⌃⌥. was taken locally. Karabiner-Elements, which a lot of people who care
+    /// about keyboards run, commonly remaps a whole block of Control-plus-letter — on the
+    /// machine this was measured on: a d e f h i j k l m n p r u w y , . and ; — which
+    /// rules out the obvious mnemonics (P for pause, D for down). S, C and X are in none
+    /// of it and in no Apple default.
+    ///
+    /// Anyone who disagrees rebinds in Keyboard Shortcuts…; these are only the defaults.
     var defaultHotkey: Hotkey {
         switch self {
         case .speak:
             return Hotkey(keyCode: UInt32(kVK_ANSI_S),
                           modifiers: Hotkey.control | Hotkey.option)
         case .pause:
-            return Hotkey(keyCode: UInt32(kVK_Space),
+            return Hotkey(keyCode: UInt32(kVK_ANSI_C),
                           modifiers: Hotkey.control | Hotkey.option)
         case .stop:
-            return Hotkey(keyCode: UInt32(kVK_ANSI_Period),
+            return Hotkey(keyCode: UInt32(kVK_ANSI_X),
                           modifiers: Hotkey.control | Hotkey.option)
         }
     }
