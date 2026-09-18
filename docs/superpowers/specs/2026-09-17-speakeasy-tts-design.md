@@ -323,13 +323,41 @@ skip button steps by sentence instead.
 | Selection read (AX path) | ~5ms |
 | Selection read (⌘C fallback) | ~80ms, plus wait-for-changeCount |
 | Text preparation | ~1ms |
-| First chunk synthesis (~150 chars) | 600–1400ms, measured, variable |
+| Engine identity probe | ~15ms, once per session |
+| First chunk synthesis | **the backend's floor — see below** |
 | Audio start | ~10ms |
-| **Total to first sound** | **~0.6–1.5s** |
 
-The first-chunk figure dominates and is almost entirely the backend's fixed per-request
-cost. Reducing it is the single highest-leverage performance task after v1 works, and
-the `SpeechProvider` seam is what keeps that change contained.
+**Everything the client controls is negligible.** Measured end to end through the CLI
+against the live engine, time-to-first-sound tracks raw HTTP to the same endpoint within
+noise: ~2050ms via the full pipeline versus 1681–2107ms for a bare HTTP request of
+comparable size. The client adds no measurable overhead.
+
+**The backend's floor is large and variable.** The same engine measured ~600ms early in
+a session and ~2000ms later the same day, for the same input size, with no configuration
+change. That variability is consistent with the state-dependent behavior documented under
+Known Issues — the engine degrades as a process accumulates work. Treat any single
+latency number from this engine as a sample, not a constant.
+
+**Synthesis must be sequential, not concurrent.** This is the one latency decision the
+client owns, and it is worth stating plainly because the intuitive design is wrong.
+
+An earlier implementation dispatched one synthesis request per chunk immediately, on the
+theory that parallelism would keep playback fed. Measured, it did the opposite:
+
+| | first chunk ready | all four done |
+|---|---|---|
+| 4 requests concurrently | 8.05s | 8.05s |
+| 4 requests sequentially | **1.97s** | 7.62s |
+
+The engine runs a single model and serializes internally, so concurrent requests all
+complete together — the first chunk finishes no sooner than the last. Through the full
+pipeline this made time-to-first-sound scale with *document length*: 1898ms for a
+one-chunk input, 3846ms for three chunks, 5954ms for eight. Exactly backwards.
+
+Rendering chunks strictly in document order fixes it, costs nothing in total throughput,
+and still outruns playback comfortably, since synthesis runs many times faster than
+realtime. The same three-chunk input dropped from 3846ms to 2050ms, and the scaling with
+document length disappeared.
 
 ## Settings
 
