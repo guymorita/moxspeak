@@ -69,7 +69,10 @@ public struct Segmenter: Sendable {
         var startsSentence: Bool = false
     }
 
-    private let options: Options
+    /// The options this segmenter was built with. Readable because callers that hand a
+    /// `Segmenter` to something else — `SpeechSession` does — otherwise have no way to
+    /// report which cap is actually in force.
+    public let options: Options
     private let estimator: DurationEstimator
 
     public init(options: Options = Options(),

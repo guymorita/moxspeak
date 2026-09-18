@@ -26,6 +26,18 @@ public actor SpeechSession {
     private let estimator: DurationEstimator
     private let validation: ValidationPolicy
 
+    /// The chunk size this session will never exceed, and whether it normalizes text
+    /// before segmenting. Both come from the provider, once, at construction.
+    ///
+    /// Readable from outside because otherwise nothing can check them. `recommendedCharacterCap`
+    /// is consumed inside `init` on its way into the `Segmenter`, and `requiresTextNormalization`
+    /// is consumed inside `speak`; neither leaves a trace a caller can inspect. An app that
+    /// switches engines at runtime does so by building a new session, and "the new session
+    /// really did pick up the new engine's numbers" has to be observable for that switch to
+    /// be verifiable rather than merely intended.
+    public nonisolated let characterCap: Int
+    public nonisolated let normalizesText: Bool
+
     public private(set) var currentGeneration = 0
     public private(set) var chunks: [Chunk] = []
 
@@ -50,10 +62,16 @@ public actor SpeechSession {
         self.provider = provider
         self.preparer = preparer
         self.normalizer = normalizer
-        self.segmenter = segmenter ?? Segmenter(
+        let resolvedSegmenter = segmenter ?? Segmenter(
             options: Segmenter.Options(providerCap: provider.recommendedCharacterCap))
+        self.segmenter = resolvedSegmenter
         self.estimator = estimator
         self.validation = validation
+        // Read from the segmenter that was actually adopted, not from the provider, so an
+        // explicitly supplied segmenter is reported as what it is rather than as what the
+        // provider would have asked for.
+        self.characterCap = resolvedSegmenter.options.characterCap
+        self.normalizesText = provider.requiresTextNormalization
     }
 
     public func state(of index: Int) -> ChunkState {
