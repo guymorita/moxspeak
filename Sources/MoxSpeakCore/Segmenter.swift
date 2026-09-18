@@ -19,6 +19,25 @@ public struct Segmenter: Sendable {
         /// only bound that may never be exceeded.
         public var firstChunkCap: Int = 100
         public init() {}
+
+        /// Builds options from a provider's declared `SpeechProvider.recommendedCharacterCap`.
+        ///
+        /// `characterCap` becomes the provider's number directly — it's a provider-owned
+        /// hard bound (150 for the HTTP provider's PyTorch-MPS truncation workaround, 100
+        /// measured for the native engine's memory/sentence-length tradeoff).
+        ///
+        /// `firstChunkCap` governs time-to-first-sound and stays at its latency-tuned
+        /// default UNLESS the provider's cap is smaller, in which case it is clamped down
+        /// to match. `pack()` would already produce the same result on its own — chunk 0's
+        /// cap there is `min(firstChunkCap, characterCap)` — but leaving the relationship
+        /// to be rediscovered three fields away, inside packing logic, means a provider
+        /// declaring an unusually small cap only behaves correctly by accident. Clamping
+        /// here makes "firstChunkCap can lower, never raise, and never exceed
+        /// characterCap" a property of construction instead of an implicit consequence.
+        public init(providerCap: Int) {
+            self.characterCap = providerCap
+            self.firstChunkCap = min(self.firstChunkCap, providerCap)
+        }
     }
 
     /// A piece of text destined for a chunk, plus whether a space separates it from

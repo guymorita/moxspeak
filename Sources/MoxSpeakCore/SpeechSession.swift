@@ -32,16 +32,26 @@ public actor SpeechSession {
     private var states: [Int: ChunkState] = [:]
     private var renderTask: Task<Void, Never>?
 
+    /// - Parameter segmenter: Defaults to `nil`, which builds a `Segmenter` from
+    ///   `provider.recommendedCharacterCap` — see `Segmenter.Options.init(providerCap:)`.
+    ///   `recommendedCharacterCap` has been declared on `SpeechProvider` since the speech
+    ///   core shipped and was, until this parameter existed, never read by anything: the
+    ///   HTTP provider's 150 (a PyTorch-MPS truncation workaround) and the native
+    ///   provider's measured 100 both went in and were both silently ignored, and every
+    ///   engine got the same hardcoded `Segmenter()` regardless of what it declared. Pass
+    ///   an explicit `Segmenter` only to override that per-provider default (tests that
+    ///   exercise segmentation mechanics independent of which provider is in play).
     public init(provider: any SpeechProvider,
                 preparer: TextPreparer = TextPreparer(),
                 normalizer: TextNormalizer = TextNormalizer(),
-                segmenter: Segmenter = Segmenter(),
+                segmenter: Segmenter? = nil,
                 estimator: DurationEstimator = DurationEstimator(),
                 validation: ValidationPolicy = ValidationPolicy()) {
         self.provider = provider
         self.preparer = preparer
         self.normalizer = normalizer
-        self.segmenter = segmenter
+        self.segmenter = segmenter ?? Segmenter(
+            options: Segmenter.Options(providerCap: provider.recommendedCharacterCap))
         self.estimator = estimator
         self.validation = validation
     }
