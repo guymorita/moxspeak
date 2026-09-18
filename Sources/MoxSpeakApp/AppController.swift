@@ -248,8 +248,8 @@ final class AppController {
     ///
     /// Resolving from `settings.storedVoice` rather than from the voice currently in use
     /// is the whole point, and it matters at exactly one moment: an engine change. The
-    /// server offers 72 voices; the native engine ships 46, all English, because the
-    /// vendored MisakiSwift carries only the US English lexicon and the other 26 could
+    /// server offers 72 voices; the native engine ships 29, all English, because the
+    /// vendored MisakiSwift carries only the US English lexicon and the rest could
     /// not be phonemized anyway. So a stored non-English voice becomes unavailable the
     /// moment the engine changes — and has to come back when it changes again.
     /// Re-resolving from the voice in use would make the first fallback permanent for the
