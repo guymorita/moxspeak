@@ -35,7 +35,7 @@ import AVFoundation
 
 // MARK: - enqueue must never drop audio silently
 
-@Test func enqueueThrowsOnAPartialFrame() throws {
+@Test @MainActor func enqueueThrowsOnAPartialFrame() throws {
     // An odd byte count is what a mid-sample truncation from the backend looks like.
     // Returning quietly here would lose the chunk inside the very component built to stop
     // audio being lost quietly.
@@ -45,7 +45,7 @@ import AVFoundation
     }
 }
 
-@Test func enqueueErrorNamesTheByteCountAndFrameSize() throws {
+@Test @MainActor func enqueueErrorNamesTheByteCountAndFrameSize() throws {
     let engine = try PlaybackEngine(format: .kokoroPCM)
     do {
         try engine.enqueue(Data(count: 3))
@@ -60,21 +60,21 @@ import AVFoundation
     }
 }
 
-@Test func enqueueThrowsOnEmptyData() throws {
+@Test @MainActor func enqueueThrowsOnEmptyData() throws {
     let engine = try PlaybackEngine(format: .kokoroPCM)
     #expect(throws: SpeechError.self) {
         try engine.enqueue(Data())
     }
 }
 
-@Test func enqueueAcceptsWholeFrames() throws {
+@Test @MainActor func enqueueAcceptsWholeFrames() throws {
     let engine = try PlaybackEngine(format: .kokoroPCM)
     try engine.enqueue(Data(count: 4800))   // 0.1s, a whole number of frames
 }
 
 // MARK: - init rejects formats it cannot actually play
 
-@Test func initRejectsNon16BitFormats() {
+@Test @MainActor func initRejectsNon16BitFormats() {
     // Constructing fine and then playing total silence is worse than failing loudly:
     // `buffer(from:)` only decodes signed 16-bit PCM.
     for depth in [8, 24, 32] {
@@ -85,7 +85,7 @@ import AVFoundation
     }
 }
 
-@Test func initRejectsDegenerateChannelAndRateValues() {
+@Test @MainActor func initRejectsDegenerateChannelAndRateValues() {
     #expect(throws: SpeechError.self) {
         _ = try PlaybackEngine(format: AudioFormat(sampleRate: 24000, channels: 0,
                                                    bitDepth: 16, isRawPCM: true))
@@ -96,13 +96,13 @@ import AVFoundation
     }
 }
 
-@Test func initAcceptsThe16BitKokoroFormat() throws {
+@Test @MainActor func initAcceptsThe16BitKokoroFormat() throws {
     _ = try PlaybackEngine(format: .kokoroPCM)
 }
 
 // MARK: - Playback speed is a playback concern (C1)
 
-@Test func playbackRateIsSettableAndIndependentOfSynthesis() async throws {
+@Test @MainActor func playbackRateIsSettableAndIndependentOfSynthesis() async throws {
     // --speed lands here, on TimePitch, not on the synthesis request. It is instant,
     // pitch-corrected, and needs no re-synthesis, so changing it must not touch the
     // provider at all.
@@ -134,7 +134,7 @@ import AVFoundation
 
 // MARK: - rate is clamped, never accepted raw (a hang otherwise: see waitForDrain)
 
-@Test func rateIsClampedToASaneRange() throws {
+@Test @MainActor func rateIsClampedToASaneRange() throws {
     let engine = try PlaybackEngine(format: .kokoroPCM)
 
     engine.rate = 100.0
@@ -151,7 +151,7 @@ import AVFoundation
     #expect(engine.rate == 1.5)
 }
 
-@Test func rateOfZeroCannotHangPlayback() async throws {
+@Test @MainActor func rateOfZeroCannotHangPlayback() async throws {
     // At rate == 0 (unclamped), AVAudioUnitTimePitch never fires the scheduled buffer's
     // completion callback, so `waitForDrain()` never returns — the exact CLI hang this
     // clamp exists to prevent. Asserting the clamp took effect, then proving drain still
@@ -188,4 +188,67 @@ private func withTimeout(seconds: Double, _ operation: @escaping @Sendable () as
         group.cancelAll()
         return result
     }
+}
+
+// MARK: - Pause and resume
+
+// These assert the state machine, which is the part that has to be right and the part
+// that needs no audio hardware: a constructed-but-never-started engine drives the
+// AVAudioEngine graph not at all, so every transition below is pure bookkeeping.
+
+@Test @MainActor func aFreshEngineIsNotPaused() throws {
+    let engine = try PlaybackEngine(format: .kokoroPCM)
+    #expect(engine.isPaused == false)
+}
+
+@Test @MainActor func pauseThenResumeRoundTripsTheState() throws {
+    let engine = try PlaybackEngine(format: .kokoroPCM)
+
+    engine.pause()
+    #expect(engine.isPaused)
+
+    engine.resume()
+    #expect(engine.isPaused == false)
+}
+
+@Test @MainActor func pauseAndResumeAreIdempotent() throws {
+    // The toggle is reachable from a hotkey, a menu item and a media key at once, so a
+    // doubled call has to be harmless rather than flipping the state back.
+    let engine = try PlaybackEngine(format: .kokoroPCM)
+
+    engine.pause()
+    engine.pause()
+    #expect(engine.isPaused, "a second pause must not un-pause")
+
+    engine.resume()
+    engine.resume()
+    #expect(engine.isPaused == false, "a second resume must not re-pause")
+}
+
+@Test @MainActor func resumingAnEngineThatWasNeverPausedDoesNothing() throws {
+    let engine = try PlaybackEngine(format: .kokoroPCM)
+    engine.resume()
+    #expect(engine.isPaused == false)
+}
+
+@Test @MainActor func stopClearsThePausedState() throws {
+    // Otherwise the next utterance starts in a paused engine and plays silence with
+    // nothing on screen explaining why.
+    let engine = try PlaybackEngine(format: .kokoroPCM)
+    engine.pause()
+    engine.stop()
+    #expect(engine.isPaused == false)
+}
+
+@Test @MainActor func startClearsThePausedState() throws {
+    // A start is always a fresh transport start; a pause issued while stopped is not
+    // carried across it. (This one does touch the audio device, unavoidably — starting
+    // is the thing under test.)
+    let engine = try PlaybackEngine(format: .kokoroPCM)
+    engine.pause()
+    #expect(engine.isPaused)
+
+    try engine.start()
+    #expect(engine.isPaused == false)
+    engine.stop()
 }

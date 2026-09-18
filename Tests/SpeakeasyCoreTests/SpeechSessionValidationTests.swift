@@ -292,7 +292,7 @@ private func session(_ provider: some SpeechProvider,
 
 // MARK: - Validation is not affected by playback speed (C1)
 
-@Test func truncatedAudioIsRejectedWhateverThePlaybackRate() async throws {
+@Test @MainActor func truncatedAudioIsRejectedWhateverThePlaybackRate() async throws {
     // The regression this pins: when `speak` took a `speed:` and passed it to the provider,
     // a speed below 1.0 made the returned audio longer than the speed-blind estimate, so a
     // chunk the backend had truncated to 35% sailed through the ratio check and the whole
