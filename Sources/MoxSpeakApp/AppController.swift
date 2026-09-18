@@ -248,8 +248,8 @@ final class AppController {
     ///
     /// Resolving from `settings.storedVoice` rather than from the voice currently in use
     /// is the whole point, and it matters at exactly one moment: an engine change. The
-    /// server offers 72 voices; the native engine ships 46, all English, because the
-    /// vendored MisakiSwift carries only the US English lexicon and the other 26 could
+    /// server offers 72 voices; the native engine ships 29, all English, because the
+    /// vendored MisakiSwift carries only the US English lexicon and the rest could
     /// not be phonemized anyway. So a stored non-English voice becomes unavailable the
     /// moment the engine changes — and has to come back when it changes again.
     /// Re-resolving from the voice in use would make the first fallback permanent for the
@@ -320,7 +320,16 @@ final class AppController {
     /// are using select-to-speak and is silently on some other path will hear the *wrong
     /// text*, which is a failure that announces itself as a success. That is precisely
     /// the class of bug this project refuses to ship.
+    ///
+    /// The log also names the frontmost application, because a report that says only
+    /// "tier 2, nothing selected" cannot be acted on — it could be any app on the
+    /// machine. Captured here, synchronously, and not inside `readAndSpeak`: tier 2 waits
+    /// on another process, and focus can move in that gap, so reading it late would risk
+    /// blaming whatever app happened to be frontmost when the log line was written rather
+    /// than the one the user actually pressed the hotkey in.
     func speakText() {
+        let appLabel = Self.frontmostAppLabel()
+
         // Tier 2 waits on another process to service a keystroke, so the read is async.
         // Re-entrance is dropped rather than queued: two overlapping reads would both be
         // saving and restoring the same pasteboard, and the loser would restore the
@@ -332,8 +341,26 @@ final class AppController {
         isReadingSelection = true
         Task { [weak self] in
             defer { self?.isReadingSelection = false }
-            await self?.readAndSpeak()
+            await self?.readAndSpeak(frontmost: appLabel)
         }
+    }
+
+    /// The frontmost application, formatted for the log: name and bundle identifier
+    /// together, because the name alone is ambiguous (which of a user's several
+    /// Terminal-like apps?) and the bundle identifier alone means nothing to a person
+    /// reading the log by eye.
+    private static func frontmostAppLabel() -> String {
+        describeFrontmost(name: NSWorkspace.shared.frontmostApplication?.localizedName,
+                          bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+    }
+
+    /// The formatting rule, with the world passed in so it can be checked without a real
+    /// frontmost application — mirrors why `SelectionReader.decide` takes its world as
+    /// arguments rather than reading it live. `nonisolated` because it touches nothing
+    /// of `AppController`'s state and has no business demanding the main actor just
+    /// because the type it lives on does.
+    nonisolated static func describeFrontmost(name: String?, bundleID: String?) -> String {
+        "\(name ?? "an unknown app") (\(bundleID ?? "no bundle id"))"
     }
 
     /// The menu's "Speak Clipboard" item.
@@ -357,7 +384,7 @@ final class AppController {
         speak(text)
     }
 
-    private func readAndSpeak() async {
+    private func readAndSpeak(frontmost appLabel: String) async {
         let reading = await SelectionReader.read()
 
         // Trust is re-read on every press rather than cached at launch, because it is
@@ -366,7 +393,7 @@ final class AppController {
         menuBar?.setSelectToSpeak(active: reading.isTrusted)
 
         AppLog.write("speak: source=\(reading.source.rawValue) "
-                     + "(tier \(reading.source.tier)) — \(reading.reason)")
+                     + "(tier \(reading.source.tier)) from \(appLabel) — \(reading.reason)")
 
         guard let text = reading.text else {
             // Non-modal, self-clearing, and it says which of the things happened —
@@ -375,7 +402,7 @@ final class AppController {
             idleNote = "Nothing to speak — \(reading.note)"
             lastError = nil
             refresh()
-            AppLog.write("speak: nothing to say — \(reading.note)")
+            AppLog.write("speak: nothing to say from \(appLabel) — \(reading.note)")
             return
         }
         speak(text)

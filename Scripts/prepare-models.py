@@ -30,6 +30,21 @@ from safetensors.torch import save_file
 # so converting the rest would be dead weight on disk.
 ENGLISH_PREFIXES = ("af_", "am_", "bf_", "bm_")
 
+# Two families of files that live in the Kokoro-FastAPI voice directory but are not part
+# of what hexgrad released, and that the app deliberately does not ship:
+#
+#   *_v0*   superseded earlier generations of voices we already have. "af_v0bella" is the
+#           previous af_bella; shipping both puts two rows in the picker for one voice and
+#           makes the older one look like a peer of the newer.
+#   *_inno  outputs of Kokoro-FastAPI's own voice-tuning/cloning feature, not voices the
+#           model's authors shipped. They are not in VOICES.md, nobody has characterised
+#           them, and nothing upstream vouches for them.
+#
+# 17 files, 8.7 MB, and removing them is most of what made the voice picker choosable.
+# Pass --all-variants to convert them anyway.
+def is_excluded_variant(stem):
+    return "_v0" in stem or stem.endswith("_inno")
+
 
 def flatten(state_dict, prefix=""):
     """Kokoro's .pth nests one state dict per component ("bert", "decoder", ...), and
@@ -63,6 +78,11 @@ def main():
         action="store_true",
         help="convert every voice, not just the English ones",
     )
+    parser.add_argument(
+        "--all-variants",
+        action="store_true",
+        help="convert the _v0 and _inno variants too (see is_excluded_variant)",
+    )
     args = parser.parse_args()
 
     out = args.out
@@ -84,8 +104,12 @@ def main():
     print(f"wrote {out / 'kokoro-v1_0-fp16.safetensors'}")
 
     count = 0
+    skipped = 0
     for path in sorted(args.voices.glob("*.pt")):
         if not args.all_languages and not path.name.startswith(ENGLISH_PREFIXES):
+            continue
+        if not args.all_variants and is_excluded_variant(path.stem):
+            skipped += 1
             continue
         vector = torch.load(path, map_location="cpu", weights_only=True)
         save_file(
@@ -94,6 +118,8 @@ def main():
         )
         count += 1
     print(f"wrote {count} voices to {out / 'voices'}")
+    if skipped:
+        print(f"skipped {skipped} _v0/_inno variants (--all-variants to keep them)")
 
 
 if __name__ == "__main__":

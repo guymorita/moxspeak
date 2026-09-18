@@ -155,7 +155,7 @@ The Kokoro weights and voice vectors are ~490 MB and are gitignored (`Models/`,
 |---|---|---|
 | `Models/kokoro-v1_0.safetensors` | `kokoro-v1_0.pth`, cast to f32 | 312 MB |
 | `Models/kokoro-v1_0-fp16.safetensors` | same, cast to f16 | 156 MB |
-| `Models/voices/*.safetensors` | one `.pt` per voice, f32, key `"voice"` | 23 MB (46 English voices) |
+| `Models/voices/*.safetensors` | one `.pt` per voice, f32, key `"voice"` | 15 MB (29 English voices) |
 
 Upstream of all three is the `hexgrad/Kokoro-82M` v1.0 release. On this machine they are
 already on disk inside the Kokoro-FastAPI checkout, which is where the re-fetch reads
@@ -176,6 +176,19 @@ If that checkout is gone, the same files are on Hugging Face at
   --voices     /Users/guymorita/Dev/Kokoro-FastAPI/api/src/voices/v1_0 \
   --out        Models
 ```
+
+The Kokoro-FastAPI voice directory holds more than hexgrad released. `prepare-models.py`
+skips two families of it, which is why 29 voices come out of a directory with 46 English
+`.pt` files in it:
+
+- `*_v0*` — superseded earlier generations of voices already in the set (`af_v0bella` is
+  the previous `af_bella`). Two picker rows for one voice, the older one looking like a
+  peer of the newer.
+- `*_inno` — outputs of Kokoro-FastAPI's own voice-tuning/cloning feature. Not in
+  `VOICES.md`, not characterised anywhere, not something the model's authors shipped.
+
+`--all-variants` converts them anyway. `VoiceCatalogTests.noSupersededOrClonedVariantsShip`
+fails if they ever end up back in `Models/voices`.
 
 The one non-obvious thing the script does is strip the `module.` segment every key
 carries from the DataParallel wrapper Kokoro was trained under. `bert.module.embeddings…`
