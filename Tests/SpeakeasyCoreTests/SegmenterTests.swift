@@ -54,11 +54,38 @@ private func makeSegmenter(cap: Int = 150, firstCap: Int = 100) -> Segmenter {
 }
 
 @Test func neverSplitsMultiByteCharacters() {
-    let s = makeSegmenter()
-    let emoji = String(repeating: "categoría", count: 40) // accented, no spaces
-    let chunks = s.segment(emoji)
-    for c in chunks { #expect(c.characterCount <= 150) }
-    #expect(chunks.map(\.text).joined() == emoji)
+    // Every one of these is a single Character built from several Unicode scalars, which
+    // is the whole point: a hardSplit that counted scalars instead of Characters would
+    // tear one of them in half. "categoría" would NOT catch that — its "í" is a single
+    // scalar, so a scalar-based splitter passes it.
+    let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}"  // ZWJ sequence, 7 scalars
+    let flag = "\u{1F1FA}\u{1F1F8}"                                              // regional pair, 2 scalars
+    let combining = "e\u{0301}"                                                  // e + combining acute, 2 scalars
+    let unit = family + flag + combining
+    #expect(unit.count == 3, "each piece must be exactly one grapheme cluster")
+
+    // One spaceless 180-Character "word", forced through hardSplit by a 100-char cap.
+    let word = String(repeating: unit, count: 60)
+    #expect(word.count == 180)
+    #expect(word.unicodeScalars.count == 660, "scalar count must differ from Character count")
+
+    let s = makeSegmenter(cap: 100, firstCap: 100)
+    let chunks = s.segment(word)
+
+    #expect(chunks.count > 1, "the input must actually be split for this test to mean anything")
+    #expect(chunks.map(\.text).joined() == word, "no character may be lost or duplicated")
+
+    // The load-bearing assertion: every chunk must consist ENTIRELY of whole clusters.
+    // A scalar-based split leaves a chunk ending in a bare "\u{1F468}" or starting with a
+    // lone ZWJ or half a flag, none of which are in this set.
+    let whole: Set<Character> = Set(unit)
+    for c in chunks {
+        #expect(c.characterCount <= 100, "chunk \(c.id) was \(c.characterCount) chars")
+        for character in c.text {
+            #expect(whole.contains(character),
+                    "chunk \(c.id) contains a torn cluster: \(character.unicodeScalars.map { String($0.value, radix: 16) })")
+        }
+    }
 }
 
 @Test func preservesEveryCharacterAcrossChunkBoundaries() {
@@ -81,10 +108,25 @@ private func makeSegmenter(cap: Int = 150, firstCap: Int = 100) -> Segmenter {
 }
 
 @Test func doesNotSplitOnAbbreviationPeriods() {
-    let s = makeSegmenter()
-    let chunks = s.segment("Dr. Smith went home. Mr. Jones stayed.")
-    #expect(chunks.count == 1)
-    #expect(chunks[0].text.contains("Dr. Smith"))
+    // The abbreviation has to land ON a chunk boundary for this to test anything. A short
+    // input is packed back into one chunk no matter how the sentences were cut, so a naive
+    // "split after every period" tokenizer would pass it without being detected.
+    //
+    // Sized so the leading sentence (52 chars) fills most of the 60-char cap:
+    //   NLTokenizer  -> ["Padding ... indeed.", "Dr. Smith went home."]
+    //                   the second unit (21 with its space) does not fit, so it is flushed
+    //                   whole and "Dr. Smith" stays together.
+    //   naive period -> ["Padding ... indeed.", "Dr.", "Smith went home."]
+    //                   "Dr." (4 with its space) DOES fit, so the chunk ends "... indeed. Dr."
+    //                   and "Smith went home." is torn off into the next chunk.
+    let s = makeSegmenter(cap: 60, firstCap: 60)
+    let chunks = s.segment("Padding sentence one is here and fairly long indeed. Dr. Smith went home.")
+
+    #expect(chunks.count == 2, "the input must straddle a chunk boundary")
+    #expect(!chunks.contains { $0.text.hasSuffix("Dr.") },
+            "a chunk ended on an abbreviation period: \(chunks.map(\.text))")
+    #expect(chunks.contains { $0.text.contains("Dr. Smith") },
+            "\"Dr. Smith\" was torn across chunks: \(chunks.map(\.text))")
 }
 
 @Test func packsShortSentencesTogether() {

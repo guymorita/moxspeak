@@ -25,6 +25,18 @@ public final class PlaybackEngine: @unchecked Sendable {
     private let pending = PendingCount()
 
     public init(format: AudioFormat) throws {
+        // Reject up front anything `buffer(from:)` cannot decode. Without this the engine
+        // constructs happily, every `enqueue` hands it audio it cannot convert, and the
+        // user hears total silence with nothing reported anywhere.
+        guard format.bitDepth == 16 else {
+            throw SpeechError.badResponse(
+                "unsupported bit depth \(format.bitDepth); only signed 16-bit PCM is decoded")
+        }
+        guard format.channels > 0, format.sampleRate > 0 else {
+            throw SpeechError.badResponse(
+                "invalid audio format: \(format.channels) channels at \(format.sampleRate) Hz")
+        }
+
         self.format = format
         guard let processing = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                              sampleRate: format.sampleRate,
@@ -52,8 +64,20 @@ public final class PlaybackEngine: @unchecked Sendable {
         player.play()
     }
 
+    /// Schedules one chunk of raw PCM for playback.
+    ///
+    /// Throws rather than dropping unconvertible bytes. A byte count that is not a whole
+    /// number of frames is exactly what a mid-sample truncation from the backend looks
+    /// like, and silently skipping it would lose audio inside the one component built to
+    /// stop audio being lost silently. No chunk is ever discarded without a caller hearing
+    /// about it.
     public func enqueue(_ data: Data) throws {
-        guard let buffer = Self.buffer(from: data, format: format) else { return }
+        guard let buffer = Self.buffer(from: data, format: format) else {
+            let bytesPerFrame = (format.bitDepth / 8) * format.channels
+            throw SpeechError.badResponse(
+                "cannot decode \(data.count) bytes as PCM: expected a non-zero multiple of "
+                + "\(bytesPerFrame) bytes per frame")
+        }
         pending.increment()
         player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [pending] _ in
             pending.decrement()

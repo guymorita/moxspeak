@@ -48,8 +48,12 @@ public actor SpeechSession {
     }
 
     /// Replaces whatever is playing. Returns the new generation.
+    ///
+    /// There is deliberately no `speed:` parameter. Synthesis always runs at 1.0 — see
+    /// `synthesisSpeed` — and playback speed is a downstream concern handled by
+    /// `PlaybackEngine.rate`.
     @discardableResult
-    public func speak(_ raw: String, voice: String, speed: Double) -> Int {
+    public func speak(_ raw: String, voice: String) -> Int {
         cancelAll()
 
         currentGeneration += 1
@@ -60,9 +64,24 @@ public actor SpeechSession {
         states = [:]
         for chunk in chunks { states[chunk.id] = .pending }
 
-        startRendering(generation: generation, voice: voice, speed: speed)
+        startRendering(generation: generation, voice: voice)
         return generation
     }
+
+    /// The session always synthesizes at 1.0 and never varies it.
+    ///
+    /// Validation compares the *measured* duration of returned audio against
+    /// `DurationEstimator`'s character-count estimate, and that estimate is only valid at
+    /// speed 1.0: a request at speed `s` returns audio roughly `1/s` as long, so any other
+    /// value silently skews the comparison. Above ~1.67 every healthy chunk would fail the
+    /// ratio check and burn the whole retry ladder; below 1.0 a genuinely truncated chunk
+    /// would read as acceptable and switch the safety net off entirely.
+    ///
+    /// Playback speed is not lost by this — it is handled downstream by
+    /// `PlaybackEngine`'s `AVAudioUnitTimePitch`, which changes rate instantly and
+    /// pitch-corrected with no re-synthesis. `SpeechProvider.synthesize` keeps its `speed`
+    /// parameter because engines support it and a future caller may want it.
+    private static let synthesisSpeed: Double = 1.0
 
     /// Cancels every in-flight render task and returns immediately — fire-and-forget.
     /// This does NOT wait for the cancelled work to actually unwind. That's deliberate:
@@ -107,7 +126,7 @@ public actor SpeechSession {
     /// the concurrent requests internally anyway. Synthesis still runs at 7-20x realtime,
     /// so a single sequential render task still comfortably outruns playback — the
     /// continuous-read-ahead intent is preserved, it just no longer stampedes the server.
-    private func startRendering(generation: Int, voice: String, speed: Double) {
+    private func startRendering(generation: Int, voice: String) {
         let chunksToRender = chunks
         renderTask = Task { [weak self] in
             guard let self else { return }
@@ -116,23 +135,29 @@ public actor SpeechSession {
                 guard await self.currentGeneration == generation else { return }
                 await self.render(chunk: chunk,
                                    generation: generation,
-                                   voice: voice,
-                                   speed: speed)
+                                   voice: voice)
             }
         }
     }
 
-    private func render(chunk: Chunk, generation: Int, voice: String, speed: Double) async {
+    private func render(chunk: Chunk, generation: Int, voice: String) async {
         guard generation == currentGeneration else { return }
         states[chunk.id] = .synthesizing
 
         do {
-            let data = try await synthesizeValidated(chunk: chunk, voice: voice, speed: speed)
+            let data = try await synthesizeValidated(chunk: chunk, voice: voice)
             // The generation may have advanced while this was in flight.
             guard generation == currentGeneration else { return }
             let duration = estimator.duration(ofBytes: data.count, format: provider.outputFormat)
             states[chunk.id] = .rendered(data: data, duration: duration)
         } catch is CancellationError {
+            // A cancelled chunk must still reach a terminal state. Leaving it in
+            // `.synthesizing` would strand every consumer that polls `state(of:)` for
+            // completion (the CLI does exactly that) in an infinite wait. The generation
+            // guard still applies: if a newer generation has taken over, these chunk ids
+            // belong to someone else's document and must not be written.
+            guard generation == currentGeneration else { return }
+            states[chunk.id] = .failed(reason: "cancelled")
             return
         } catch {
             guard generation == currentGeneration else { return }
@@ -158,21 +183,19 @@ public actor SpeechSession {
     /// attempt budget), up to `maxSplitDepth` levels deep. Halves are concatenated in
     /// order; only once the depth limit is exhausted does a piece give up, and its
     /// failure propagates up and fails the whole chunk.
-    private func synthesizeValidated(chunk: Chunk,
-                                     voice: String,
-                                     speed: Double) async throws -> Data {
-        try await synthesizeWithRecovery(text: chunk.text, voice: voice, speed: speed, depth: 0)
+    private func synthesizeValidated(chunk: Chunk, voice: String) async throws -> Data {
+        try await synthesizeWithRecovery(text: chunk.text, voice: voice, depth: 0)
     }
 
     private func synthesizeWithRecovery(text: String,
                                         voice: String,
-                                        speed: Double,
                                         depth: Int) async throws -> Data {
         var lastData = Data()
         var attempt = 0
         while attempt <= validation.maxRetries {
             try Task.checkCancellation()
-            lastData = try await provider.synthesize(text: text, voice: voice, speed: speed)
+            lastData = try await provider.synthesize(text: text, voice: voice,
+                                                     speed: Self.synthesisSpeed)
             if isAcceptable(data: lastData, for: text) { return lastData }
             attempt += 1
         }
@@ -181,12 +204,22 @@ public actor SpeechSession {
         // backend's working range, and failures are intermittent, so halving and
         // recursing — with its own full attempt budget — is a real chance at recovery,
         // not just a formality.
+        //
+        // `splitInHalf` returns nil below four words, so a piece that short gives up here
+        // without ever attempting a split. That is intentional, not an oversight: halving
+        // a two- or three-word piece produces one- and two-word fragments, which the
+        // backend prosodies differently and which carry so little text that the duration
+        // estimate itself becomes noise — splitting there trades a visible failure for a
+        // silent, unvalidatable one. The retry budget is the whole defense at that size.
         if depth < validation.maxSplitDepth, let halves = splitInHalf(text) {
             var combined = Data()
+            // Halves are appended in document order. Order is invisible to the duration
+            // check — reversed audio has exactly the right length — so it is guaranteed
+            // here by construction and asserted directly in the tests.
             for piece in halves {
                 try Task.checkCancellation()
                 let data = try await synthesizeWithRecovery(text: piece, voice: voice,
-                                                             speed: speed, depth: depth + 1)
+                                                             depth: depth + 1)
                 combined.append(data)
             }
             return combined

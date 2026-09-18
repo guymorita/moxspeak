@@ -58,9 +58,13 @@ case "speak":
 
     let session = SpeechSession(provider: provider)
     let engine = try PlaybackEngine(format: provider.outputFormat)
+    // --speed is a playback setting, not a synthesis setting. TimePitch applies it
+    // instantly and pitch-corrected, and synthesis stays at 1.0 where the duration
+    // estimate that validation depends on is actually valid.
+    engine.rate = Float(speed)
     try engine.start()
 
-    await session.speak(text, voice: voice, speed: speed)
+    await session.speak(text, voice: voice)
     let chunks = await session.chunks
     guard !chunks.isEmpty else { exit(0) }
 
@@ -85,7 +89,12 @@ case "speak":
                 FileHandle.standardError.write(Data("time to first sound: \(ms)ms\n".utf8))
                 firstSoundReported = true
             }
-            try engine.enqueue(data)
+            do {
+                try engine.enqueue(data)
+            } catch {
+                FileHandle.standardError.write(Data(
+                    "chunk \(chunk.id) failed: \(error)\n".utf8))
+            }
         case .failed(let reason):
             FileHandle.standardError.write(Data("chunk \(chunk.id) failed: \(reason)\n".utf8))
         default:

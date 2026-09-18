@@ -58,6 +58,9 @@ public enum SpeechError: Error, Equatable, Sendable {
     case httpStatus(code: Int, body: String)
     case emptyAudio
     case shortAudio(expected: TimeInterval, got: TimeInterval)
+    /// Reserved. Nothing throws this yet: `SpeechProvider.outputFormat` is trusted rather
+    /// than checked against responses. It is kept in place for the response-format check
+    /// deferred to a later plan.
     case formatMismatch(expected: AudioFormat, got: AudioFormat)
     case transport(String)
     case badResponse(String)

@@ -16,7 +16,7 @@ private let article = String(
 
 @Test func rendersEveryChunk() async {
     let session = makeSession(provider: FakeProvider())
-    _ = await session.speak(article, voice: "af_bella", speed: 1.0)
+    _ = await session.speak(article, voice: "af_bella")
     await session.waitForRenderComplete()
 
     let chunks = await session.chunks
@@ -31,24 +31,30 @@ private let article = String(
 
 @Test func advancesGenerationOnEachSpeak() async {
     let session = makeSession(provider: FakeProvider())
-    let first = await session.speak("Hello there.", voice: "v", speed: 1.0)
-    let second = await session.speak("Different text.", voice: "v", speed: 1.0)
+    let first = await session.speak("Hello there.", voice: "v")
+    let second = await session.speak("Different text.", voice: "v")
     #expect(second > first)
 }
 
-@Test func staleResponsesAreDiscardedAfterReplace() async throws {
+/// Named for what it actually checks: `speak` swaps `chunks` and `currentGeneration`
+/// synchronously, even with a slow render already in flight.
+///
+/// It does NOT prove stale responses are discarded — it cannot, because the old work is
+/// cancelled here and never gets the chance to commit. That mechanism is covered by
+/// `staleWorkIsDiscardedEvenWhenItIgnoresCancellation`, which uses a provider that
+/// ignores cancellation and resolves the stale call LAST.
+@Test func speakReplacesChunksAndGenerationSynchronously() async throws {
     let fake = FakeProvider()
     await fake.setBehavior(.slow(seconds: 2))
     let session = makeSession(provider: fake)
 
-    _ = await session.speak(article, voice: "v", speed: 1.0)
+    _ = await session.speak(article, voice: "v")
     try await Task.sleep(for: .milliseconds(50))
 
     await fake.setBehavior(.normal)
-    let newGeneration = await session.speak("Completely different text.", voice: "v", speed: 1.0)
+    let newGeneration = await session.speak("Completely different text.", voice: "v")
     await session.waitForRenderComplete()
 
-    // The new generation's chunks are present and the old work committed nothing.
     #expect(await session.currentGeneration == newGeneration)
     let chunks = await session.chunks
     #expect(chunks.count == 1)
@@ -60,11 +66,34 @@ private let article = String(
     await fake.setBehavior(.slow(seconds: 5))
     let session = makeSession(provider: fake)
 
-    _ = await session.speak(article, voice: "v", speed: 1.0)
+    _ = await session.speak(article, voice: "v")
     try await Task.sleep(for: .milliseconds(50))
     await session.cancelAllAndWait()
 
     #expect(await fake.cancelledCount >= 1)
+}
+
+@Test func cancelledChunkReachesATerminalState() async throws {
+    // A cancelled chunk used to sit in `.synthesizing` forever. Anything polling
+    // `state(of:)` for completion — the CLI's playback loop, and the HUD to come — would
+    // spin on it indefinitely.
+    let fake = FakeProvider()
+    await fake.setBehavior(.slow(seconds: 5))
+    let session = makeSession(provider: fake)
+
+    _ = await session.speak(article, voice: "v")
+    try await Task.sleep(for: .milliseconds(50))
+    await session.cancelAllAndWait()
+
+    let state = await session.state(of: 0)
+    switch state {
+    case .failed, .rendered:
+        break   // terminal: a consumer can stop waiting
+    case .synthesizing:
+        Issue.record("chunk 0 is stranded in .synthesizing after cancellation")
+    case .pending:
+        Issue.record("chunk 0 never left .pending; the test did not reach the cancel path")
+    }
 }
 
 @Test func staleWorkIsDiscardedEvenWhenItIgnoresCancellation() async throws {
@@ -110,10 +139,10 @@ private let article = String(
                                 segmenter: Segmenter(),
                                 estimator: estimator)
 
-    _ = await session.speak("First selection that will be replaced.", voice: "v", speed: 1.0)
+    _ = await session.speak("First selection that will be replaced.", voice: "v")
     try await Task.sleep(for: .milliseconds(20))   // let the first (slow) chunk get in flight
 
-    let newGeneration = await session.speak("Second selection.", voice: "v", speed: 1.0)
+    let newGeneration = await session.speak("Second selection.", voice: "v")
 
     // Give both the fast current-generation call and the slow, abandoned
     // first-generation call more than enough time to finish and try to commit.
@@ -135,13 +164,13 @@ private let article = String(
 
 @Test func emptyInputProducesNoChunks() async {
     let session = makeSession(provider: FakeProvider())
-    _ = await session.speak("   ", voice: "v", speed: 1.0)
+    _ = await session.speak("   ", voice: "v")
     #expect(await session.chunks.isEmpty)
 }
 
 @Test func appliesTextPreparationBeforeSegmenting() async {
     let session = makeSession(provider: FakeProvider())
-    _ = await session.speak("## A **heading**", voice: "v", speed: 1.0)
+    _ = await session.speak("## A **heading**", voice: "v")
     let chunks = await session.chunks
     #expect(chunks.first?.text == "A heading")
 }
@@ -173,7 +202,7 @@ private let article = String(
     let s = SpeechSession(provider: recorder, preparer: TextPreparer(),
                           segmenter: Segmenter(), estimator: DurationEstimator())
     let text = (1...6).map { "Sentence number \($0) has several words in it here." }.joined(separator: " ")
-    _ = await s.speak(text, voice: "v", speed: 1.0)
+    _ = await s.speak(text, voice: "v")
     await s.waitForRenderComplete()
 
     #expect(await recorder.maxInFlight == 1, "synthesis must not run concurrently")

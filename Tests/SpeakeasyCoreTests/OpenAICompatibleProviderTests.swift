@@ -39,7 +39,7 @@ private func ok(_ data: Data, url: URL) -> (HTTPURLResponse, Data) {
 
 // MARK: - Tests
 //
-// These six tests share one process-wide `StubURLProtocol.handler`. Swift Testing runs
+// These tests all share one process-wide `StubURLProtocol.handler`. Swift Testing runs
 // @Test functions concurrently by default, which races on that shared static and produces
 // cross-test contamination (test A's request served by test B's handler). `.serialized`
 // forces this suite's tests to run one at a time so the shared stub is safe under the
@@ -49,7 +49,6 @@ private func ok(_ data: Data, url: URL) -> (HTTPURLResponse, Data) {
 struct OpenAICompatibleProviderTests {
 
     @Test func sendsCorrectRequestBody() async throws {
-        let url = URL(string: "http://localhost:8880")!
         nonisolated(unsafe) var captured: Data?
         StubURLProtocol.handler = { request in
             captured = request.httpBodyStreamData() ?? request.httpBody
@@ -125,6 +124,45 @@ struct OpenAICompatibleProviderTests {
         let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
                                                 session: stubbedSession())
         #expect(await provider.identityProbe() == true)
+    }
+
+    @Test func identityProbeRejectsAnEmptyVoiceList() async {
+        // This is the security gate, not a nicety: `identityProbe` is what stands between
+        // the user's selected text and an unidentified endpoint. A server that answers
+        // `{"voices":[]}` has proven nothing about being a TTS engine, so it must be
+        // rejected. Relaxing the check to `return true` has to fail here.
+        let payload = Data(#"{"voices":[]}"#.utf8)
+        StubURLProtocol.handler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                             headerFields: ["Content-Type": "application/json"])!, payload)
+        }
+        let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
+                                                session: stubbedSession())
+        #expect(await provider.identityProbe() == false)
+    }
+
+    @Test func cancelledTransportErrorIsMappedToCancellationError() async {
+        // Load-bearing mapping: `SpeechSession.render` catches `CancellationError` to tell
+        // "the user replaced the selection" apart from "the backend failed". Without this
+        // translation a deliberately cancelled chunk would surface as `.failed` with a
+        // URLError, and the cancellation path in `render` would never run.
+        StubURLProtocol.handler = { _ in throw URLError(.cancelled) }
+        let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
+                                                session: stubbedSession())
+        await #expect(throws: CancellationError.self) {
+            try await provider.synthesize(text: "hello", voice: "v", speed: 1.0)
+        }
+    }
+
+    @Test func otherTransportErrorsAreNotMappedToCancellation() async {
+        // The counterpart: a genuine network failure must stay a SpeechError, or every
+        // backend outage would be silently swallowed as "cancelled".
+        StubURLProtocol.handler = { _ in throw URLError(.cannotConnectToHost) }
+        let provider = OpenAICompatibleProvider(config: .kokoroLocal(port: 8880),
+                                                session: stubbedSession())
+        await #expect(throws: SpeechError.self) {
+            try await provider.synthesize(text: "hello", voice: "v", speed: 1.0)
+        }
     }
 }
 

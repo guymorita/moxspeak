@@ -6,7 +6,14 @@ import Foundation
 /// not streaming semantics, not error payloads. Every one of those is declared here so
 /// the session can adapt rather than assume.
 public protocol SpeechProvider: Sendable {
-    /// Exactly what `synthesize` returns. Validated against the first response.
+    /// What `synthesize` is declared to return.
+    ///
+    /// This is trusted, NOT verified: nothing inspects a response and checks it against
+    /// this declaration. Every duration in the pipeline is computed by dividing a byte
+    /// count by this format's `bytesPerSecond`, so a mis-declared format makes every
+    /// computed duration wrong — and with it every validation decision that compares a
+    /// measured duration against an estimate. Checking responses against this value is
+    /// deliberately deferred to a later plan.
     var outputFormat: AudioFormat { get }
 
     /// False when the engine only returns complete responses. Affects chunk sizing only.
