@@ -131,3 +131,61 @@ import AVFoundation
     #expect(abs(got - expected) < 0.05)
     #expect(engine.rate == 2.0, "setting playback rate survives synthesis")
 }
+
+// MARK: - rate is clamped, never accepted raw (a hang otherwise: see waitForDrain)
+
+@Test func rateIsClampedToASaneRange() throws {
+    let engine = try PlaybackEngine(format: .kokoroPCM)
+
+    engine.rate = 100.0
+    #expect(engine.rate == PlaybackEngine.rateRange.upperBound)
+
+    engine.rate = -5.0
+    #expect(engine.rate == PlaybackEngine.rateRange.lowerBound)
+
+    engine.rate = 0.001
+    #expect(engine.rate == PlaybackEngine.rateRange.lowerBound)
+
+    // In range: passes through unchanged.
+    engine.rate = 1.5
+    #expect(engine.rate == 1.5)
+}
+
+@Test func rateOfZeroCannotHangPlayback() async throws {
+    // At rate == 0 (unclamped), AVAudioUnitTimePitch never fires the scheduled buffer's
+    // completion callback, so `waitForDrain()` never returns — the exact CLI hang this
+    // clamp exists to prevent. Asserting the clamp took effect, then proving drain still
+    // completes, is the regression test for that hang.
+    let engine = try PlaybackEngine(format: .kokoroPCM)
+    engine.rate = 0
+    #expect(engine.rate > 0, "a rate of 0 must be clamped away, or playback hangs forever")
+    try engine.start()
+
+    try engine.enqueue(Data(count: 4800))
+
+    let drained = await withTimeout(seconds: 5) {
+        await engine.waitForDrain()
+    }
+    #expect(drained, "waitForDrain() did not return within 5s — the exact hang this clamp prevents")
+    engine.stop()
+}
+
+/// Races `operation` against a timeout. Returns `true` if `operation` finished first,
+/// `false` if the timeout fired first. `operation` is not force-cancelled on timeout —
+/// `waitForDrain()`'s poll loop swallows cancellation via `try?` — so on failure it is
+/// simply left running in the background rather than being awaited any further.
+private func withTimeout(seconds: Double, _ operation: @escaping @Sendable () async -> Void) async -> Bool {
+    await withTaskGroup(of: Bool.self) { group in
+        group.addTask {
+            await operation()
+            return true
+        }
+        group.addTask {
+            try? await Task.sleep(for: .seconds(seconds))
+            return false
+        }
+        let result = await group.next() ?? false
+        group.cancelAll()
+        return result
+    }
+}

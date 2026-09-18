@@ -52,10 +52,20 @@ public final class PlaybackEngine: @unchecked Sendable {
         engine.connect(timePitch, to: engine.mainMixerNode, format: processing)
     }
 
-    /// Playback rate. 1.0 is normal; pitch is preserved.
+    /// Sane user-facing bounds for `rate`. `AVAudioUnitTimePitch.rate` itself accepts
+    /// 1/32...32, but nothing north of 3x or south of 0.5x is a rate anyone actually
+    /// wants — and a rate of exactly 0 is actively dangerous: the scheduled buffer's
+    /// completion callback never fires at 0x, so `PlaybackEngine.waitForDrain()` (and
+    /// anything that awaits it, like the CLI) hangs forever. Clamping here, in the
+    /// setter, protects every caller — CLI today, Plan 2's UI tomorrow — rather than
+    /// relying on each call site to remember to check.
+    public static let rateRange: ClosedRange<Float> = 0.5...3.0
+
+    /// Playback rate. 1.0 is normal; pitch is preserved. Values outside `rateRange` are
+    /// clamped rather than accepted as-is.
     public var rate: Float {
         get { timePitch.rate }
-        set { timePitch.rate = newValue }
+        set { timePitch.rate = min(max(newValue, Self.rateRange.lowerBound), Self.rateRange.upperBound) }
     }
 
     public func start() throws {
