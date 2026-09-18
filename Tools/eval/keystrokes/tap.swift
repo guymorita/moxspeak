@@ -12,7 +12,7 @@ import Foundation
 // registered for looks exactly like a hotkey that is broken.
 let actions: [String: (key: CGKeyCode, name: String)] = [
     "speak": (1, "S"),   // kVK_ANSI_S
-    "pause": (8, "C"),   // kVK_ANSI_C
+    "pause": (2, "D"),   // kVK_ANSI_D
     "stop":  (7, "X"),   // kVK_ANSI_X
 ]
 

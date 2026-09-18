@@ -283,8 +283,8 @@ enum HotkeyAction: String, CaseIterable, Sendable {
     case pause
     case stop
 
-    /// ⌃⌥S, ⌃⌥C, ⌃⌥X — three keys under one left hand, chosen against a real list of
-    /// what was already taken.
+    /// ⌃⌥S, ⌃⌥D, ⌃⌥X — three keys under one left hand, with the two you press constantly
+    /// side by side on the home row.
     ///
     /// **Why Control-Option.** The combination has to contain Control or Command (see
     /// `Hotkey.rejection`). ⌘⌥ is heavily used by browsers and editors; ⌃⌥ is close to
@@ -292,25 +292,41 @@ enum HotkeyAction: String, CaseIterable, Sendable {
     ///
     /// **Why one hand, and which hand.** Playback controls get pressed while the other
     /// hand is on the trackpad, scrolling the thing being read. A shortcut that needs two
-    /// hands is a shortcut that interrupts reading to use. With ⌃ under the pinky and ⌥
-    /// under the ring finger, the index and middle fingers cover the left half of the
-    /// keyboard, so the key has to live there.
+    /// hands is a shortcut that interrupts reading to use. So all three live on the left.
     ///
-    /// **Why these three keys.** S is Speak and was already in muscle memory. X is the
-    /// Mac's cancel key everywhere else, and Stop is the destructive one — it throws away
-    /// the queue — so it gets the key that already means "discard this". C sits between
-    /// them in the hand's travel and is the most reachable key nothing else claims. All
-    /// three sit in adjacent columns: S on the home row, X directly below it, C down and
-    /// one to the right.
+    /// **Why the home row specifically, and how that was got wrong once.** The first
+    /// version put Pause on C, reasoned from a grip where ⌃ is under the pinky and ⌥
+    /// under the ring finger. That is not how the person using it holds it: the thumb
+    /// rolls left onto ⌃⌥ and the index finger presses the key. Under that grip the hand
+    /// rotates and the index falls around D and F, so C — down *and* left of where the
+    /// index now sits — is a real stretch, which is what it was reported as. D is
+    /// directly under the index finger instead.
     ///
-    /// **What they had to avoid.** The first attempt used Space and Period, and both were
-    /// occupied. ⌃⌥Space is the macOS default for Select Next Input Source (symbolic
-    /// hotkey 61) — shipped by Apple, so it is taken on every Mac that has not turned it
-    /// off. ⌃⌥. was taken locally. Karabiner-Elements, which a lot of people who care
-    /// about keyboards run, commonly remaps a whole block of Control-plus-letter — on the
-    /// machine this was measured on: a d e f h i j k l m n p r u w y , . and ; — which
-    /// rules out the obvious mnemonics (P for pause, D for down). S, C and X are in none
-    /// of it and in no Apple default.
+    /// Both grips agree on the conclusion even though only one of them predicted it,
+    /// because the home row is the short move from either. Speak and Pause are the pair
+    /// pressed over and over while reading, so they get S and D, one column apart, with
+    /// no travel between them. The lesson is the usual one for this project: the model of
+    /// how somebody uses the thing is a guess until they say otherwise.
+    ///
+    /// **Why Stop is the exception.** X is the Mac's cancel key everywhere else, and
+    /// Stop is the destructive one — it throws away the queue. Putting it a row down and
+    /// a column left is deliberate: far enough that a slip while reaching for pause
+    /// cannot land on it, close enough to stay one-handed.
+    ///
+    /// **What they had to avoid.** The first attempt used Space and Period, and both
+    /// were occupied. ⌃⌥Space is the macOS default for Select Next Input Source
+    /// (symbolic hotkey 61) — shipped by Apple, so it is taken on every Mac that has not
+    /// turned it off. ⌃⌥. collided with something else locally: MoxSpeak's handler fired
+    /// and so did another one.
+    ///
+    /// Karabiner-Elements, which a lot of people who care about keyboards run, commonly
+    /// remaps a block of Control-plus-letter that includes D. It does not take ⌃⌥D: those
+    /// rules declare `mandatory: [control]` with `optional: [caps_lock]`, and Karabiner
+    /// does not match a manipulator when a modifier outside both lists is held. Holding
+    /// Option is enough to pass straight through. This was checked against the config
+    /// rather than assumed — an earlier pass ruled out the whole letter block on the
+    /// assumption that it would match, and gave up the best key on the keyboard for no
+    /// reason.
     ///
     /// Anyone who disagrees rebinds in Keyboard Shortcuts…; these are only the defaults.
     var defaultHotkey: Hotkey {
@@ -319,7 +335,7 @@ enum HotkeyAction: String, CaseIterable, Sendable {
             return Hotkey(keyCode: UInt32(kVK_ANSI_S),
                           modifiers: Hotkey.control | Hotkey.option)
         case .pause:
-            return Hotkey(keyCode: UInt32(kVK_ANSI_C),
+            return Hotkey(keyCode: UInt32(kVK_ANSI_D),
                           modifiers: Hotkey.control | Hotkey.option)
         case .stop:
             return Hotkey(keyCode: UInt32(kVK_ANSI_X),
