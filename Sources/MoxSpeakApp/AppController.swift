@@ -55,6 +55,10 @@ final class AppController {
     /// error the user never saw.
     private var lastError: String?
     private var idleNote = "Ready"
+    /// True while a ⌥⇧S read is in flight. Tier 2 saves and restores the pasteboard, and
+    /// two of those running at once would restore each other's work over the user's real
+    /// clipboard, so a second press during a read is dropped and logged.
+    private var isReadingSelection = false
     private var hotkeyWarning: String?
     /// A standing problem with the engine itself — the native model failing to load, say.
     /// Sits in the menu next to the hotkey warning rather than vanishing into the log.
@@ -87,7 +91,7 @@ final class AppController {
 
     func start() {
         let menuBar = MenuBarController(actions: .init(
-            speak: { [weak self] in self?.speakText() },
+            speak: { [weak self] in self?.speakClipboard() },
             togglePause: { [weak self] in self?.togglePause() },
             stop: { [weak self] in self?.stop() },
             selectVoice: { [weak self] in self?.selectVoice($0) },
@@ -302,32 +306,76 @@ final class AppController {
 
     // MARK: - Commands
 
-    /// ⌥⇧S. Reads the selection when the user has granted Accessibility, the clipboard
-    /// when they have not — and the clipboard anyway when there is a permission but no
-    /// selection to read.
+    /// ⌥⇧S. One shortcut, three tiers, and the user never picks between them.
     ///
-    /// Which of those happened is written to the log every single time. A user who
-    /// believes they are using select-to-speak and is silently on the clipboard path
-    /// will hear the *wrong text*, which is a failure that announces itself as a
-    /// success. That is precisely the class of bug this project refuses to ship.
+    /// 1. Accessibility reads the selection out of the focused app. Instant, and the
+    ///    clipboard is never touched.
+    /// 2. Accessibility came back empty, so the focused app is asked to copy and the
+    ///    clipboard is put back afterwards. This is what reaches Electron editors and
+    ///    anything else with a threadbare accessibility tree.
+    /// 3. No Accessibility permission: read the clipboard, exactly as MoxSpeak has always
+    ///    done with no permissions at all.
+    ///
+    /// Which tier ran is written to the log every single time. A user who believes they
+    /// are using select-to-speak and is silently on some other path will hear the *wrong
+    /// text*, which is a failure that announces itself as a success. That is precisely
+    /// the class of bug this project refuses to ship.
     func speakText() {
-        let reading = SelectionReader.read()
+        // Tier 2 waits on another process to service a keystroke, so the read is async.
+        // Re-entrance is dropped rather than queued: two overlapping reads would both be
+        // saving and restoring the same pasteboard, and the loser would restore the
+        // winner's copy over the user's real clipboard.
+        guard !isReadingSelection else {
+            AppLog.write("speak: ignored — a selection read is already in flight")
+            return
+        }
+        isReadingSelection = true
+        Task { [weak self] in
+            defer { self?.isReadingSelection = false }
+            await self?.readAndSpeak()
+        }
+    }
+
+    /// The menu's "Speak Clipboard" item.
+    ///
+    /// Deliberately *not* the three-tier path. Clicking a menu makes MoxSpeak the focused
+    /// application, so there is no longer another app's selection to read and no app to
+    /// usefully send ⌘C to — the only honest thing this item can read is the clipboard,
+    /// which is what its title says it reads.
+    func speakClipboard() {
+        menuBar?.setSelectToSpeak(active: SelectionReader.isTrusted)
+        guard let text = SelectionReader.clipboardText() else {
+            menuBar?.flash("Clipboard is empty")
+            idleNote = "Nothing to speak — the clipboard holds no text"
+            lastError = nil
+            refresh()
+            AppLog.write("speak: source=clipboard (tier 3, menu) — the clipboard holds no text")
+            return
+        }
+        AppLog.write("speak: source=clipboard (tier 3, menu) — "
+                     + "read the clipboard because the menu was the thing clicked")
+        speak(text)
+    }
+
+    private func readAndSpeak() async {
+        let reading = await SelectionReader.read()
 
         // Trust is re-read on every press rather than cached at launch, because it is
         // not ours to cache: the user can grant or revoke it in System Settings while
         // this process runs, and macOS does not tell us when they do.
         menuBar?.setSelectToSpeak(active: reading.isTrusted)
 
-        AppLog.write("speak: source=\(reading.source.rawValue) — \(reading.reason)")
+        AppLog.write("speak: source=\(reading.source.rawValue) "
+                     + "(tier \(reading.source.tier)) — \(reading.reason)")
 
         guard let text = reading.text else {
             // Non-modal, self-clearing, and it says which of the things happened —
-            // nothing copied, something copied that is not text, or nothing selected.
-            menuBar?.flash(reading.emptyFlash)
-            idleNote = "Nothing to speak — \(reading.emptyNote)"
+            // nothing selected, a selection that is not text, or no clipboard at all.
+            menuBar?.flash(reading.flash)
+            idleNote = "Nothing to speak — \(reading.note)"
             lastError = nil
             refresh()
-            AppLog.write("speak: nothing to say — \(reading.emptyNote)")
+            AppLog.write("speak: nothing to say — \(reading.note)")
             return
         }
         speak(text)

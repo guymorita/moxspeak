@@ -315,15 +315,21 @@ final class MenuBarController: NSObject {
     /// APIs, trusted processes or `AXUIElement`, because none of that is the user's
     /// problem. The ⌥⇧S item is retitled to match, so the menu never claims to read the
     /// clipboard while it is actually reading the selection, or the reverse.
+    ///
+    /// With select-to-speak on, the *item* still says clipboard while the *shortcut*
+    /// says selection, and that is not a mistake: clicking a menu makes MoxSpeak the
+    /// focused app, so by the time the click lands there is no other app's selection
+    /// left to read. The item reads the clipboard because the clipboard is the only
+    /// honest thing it can read.
     func setSelectToSpeak(active: Bool) {
         if active {
             selectToSpeakItem.title = "Select-to-Speak is on"
             selectToSpeakItem.toolTip = "⌥⇧S reads whatever is selected. "
-                                      + "If nothing is selected, it reads the clipboard."
+                                      + "If nothing is selected, it says so."
             selectToSpeakItem.state = .on
             selectToSpeakItem.action = nil
             selectToSpeakItem.isEnabled = false
-            speakItem.title = "Speak Selection  (⌥⇧S)"
+            speakItem.title = "Speak Clipboard  (⌥⇧S reads the selection)"
         } else {
             selectToSpeakItem.title = "Enable Select-to-Speak…"
             selectToSpeakItem.toolTip = "Let MoxSpeak read text you have selected, "
