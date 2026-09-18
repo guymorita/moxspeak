@@ -456,6 +456,105 @@ private let n = TextNormalizer()
             == "The file is 10KB here.")
 }
 
+// MARK: - URLs
+
+/// What a person actually says reading a URL aloud: the host, nothing else. The scheme is
+/// never spoken and the path is dropped entirely.
+@Test func expandsFullURLsToTheHostOnly() {
+    #expect(n.normalize("Read the docs at https://example.com/docs for setup.")
+            == "Read the docs at example dot com for setup.")
+    #expect(n.normalize("The API lives at http://example.com/v1/users today.")
+            == "The API lives at example dot com today.")
+}
+
+/// A query string is exactly the kind of thing nobody wants read aloud.
+@Test func dropsQueryStringsFromURLs() {
+    #expect(n.normalize("Search at https://example.com/search?q=hello&lang=en today.")
+            == "Search at example dot com today.")
+}
+
+/// "www." is dropped along with the scheme — nobody says it out loud either — but the rest
+/// of the host, and only the host, survives.
+@Test func expandsWWWPrefixedURLsToTheHostOnly() {
+    #expect(n.normalize("It ran in www.nytimes.com/2026/09/18/tech yesterday.")
+            == "It ran in nytimes dot com yesterday.")
+    #expect(n.normalize("Sales info is at www.example.com today.")
+            == "Sales info is at example dot com today.")
+}
+
+/// A bare domain with no scheme and no "www." still reads as a domain, not as a sentence
+/// that happens to end in "com".
+@Test func expandsBareDomainsWithNoSchemeOrWWW() {
+    #expect(n.normalize("Full coverage is at example.com now.") == "Full coverage is at example dot com now.")
+    #expect(n.normalize("The archive is at docs.example.org now.")
+            == "The archive is at docs dot example dot org now.")
+}
+
+/// A bare domain can carry a path too, and it is dropped the same as a scheme'd one.
+@Test func dropsThePathFromABareDomain() {
+    #expect(n.normalize("It ran in nytimes.com/2026/09/18/tech yesterday.")
+            == "It ran in nytimes dot com yesterday.")
+}
+
+/// A multi-level TLD like "co.uk" is still read as dot-separated words in full.
+@Test func expandsMultiLevelTLDs() {
+    #expect(n.normalize("Order it from example.co.uk today.") == "Order it from example dot co dot uk today.")
+}
+
+/// A URL mid-sentence keeps the punctuation that was never part of it — dropping the path
+/// must not eat the comma or period that belongs to the surrounding sentence.
+@Test func urlInsideASentenceKeepsSurroundingPunctuation() {
+    #expect(n.normalize("Check out https://example.com/docs, it's great.")
+            == "Check out example dot com, it's great.")
+}
+
+/// The defect this exists to avoid: dropping the path must not also drop the sentence's own
+/// final period and weld two sentences together.
+@Test func urlAtASentenceEndKeepsTheSentencePeriod() {
+    #expect(n.normalize("Read more at https://example.com/docs. It covers setup.")
+            == "Read more at example dot com. It covers setup.")
+    #expect(n.normalize("Read more at example.com. It covers setup.")
+            == "Read more at example dot com. It covers setup.")
+}
+
+// MARK: - Emails
+
+@Test func expandsEmailAddresses() {
+    #expect(n.normalize("Reach out to guy@example.com for access.")
+            == "Reach out to guy at example dot com for access.")
+}
+
+/// A dotted local part is spoken the same way a person reads it aloud.
+@Test func expandsEmailAddressesWithADottedLocalPart() {
+    #expect(n.normalize("Email first.last@example.com about it.")
+            == "Email first dot last at example dot com about it.")
+}
+
+@Test func emailAtASentenceEndKeepsTheSentencePeriod() {
+    #expect(n.normalize("Send it to guy@example.com. Then wait.")
+            == "Send it to guy at example dot com. Then wait.")
+}
+
+// MARK: - URLs and emails must not regress existing dot/colon rules
+
+/// "co" is itself a recognized TLD; a "Co." abbreviation sitting after a space must not be
+/// swept up by the domain rule, which requires the TLD to be glued directly onto a label.
+@Test func coAbbreviationIsNotMistakenForADomain() {
+    #expect(n.normalize("Acme Co. reported earnings early.") == "Acme Company reported earnings early.")
+}
+
+/// Version strings, decimals, times, and multi-period abbreviations all contain dots or
+/// colons that must still be read the old way, not swallowed as a URL.
+@Test func urlRulesDoNotRegressExistingDotAndColonHandling() {
+    #expect(n.normalize("We shipped 3.1.4 last week.") == "We shipped three point one point four last week.")
+    #expect(n.normalize("The gauge read 3.14.") == "The gauge read three point one four.")
+    #expect(n.normalize("The train leaves at 3:30 tomorrow.")
+            == "The train leaves at three thirty tomorrow.")
+    #expect(n.normalize("Bring a gift, e.g. a plant.") == "Bring a gift, for example a plant.")
+    #expect(n.normalize("The total came to $1,234.56 after tax.")
+            == "The total came to one thousand two hundred thirty four dollars and fifty six cents after tax.")
+}
+
 // MARK: - Idempotence
 
 /// Normalizing twice must be the same as normalizing once. Not a curiosity: the failure this
@@ -472,6 +571,8 @@ private let n = TextNormalizer()
         "Dr. Smith will see you now on St. Andrews Road.",
         "This is a state-of-the-art well-designed device.",
         "The file is 10KB and the drive holds 2TB.",
+        "Read the docs at https://example.com/docs, or email guy@example.com.",
+        "It ran in www.nytimes.com/2026/09/18/tech yesterday.",
     ]
     for input in inputs {
         let once = n.normalize(input)

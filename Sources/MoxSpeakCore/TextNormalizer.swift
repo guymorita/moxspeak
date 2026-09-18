@@ -43,7 +43,10 @@ public struct TextNormalizer: Sendable {
 
     /// Stages run in a fixed order, and most of the order is load-bearing:
     ///
-    /// - Abbreviations go first so "Dec. 3rd" is a month before anything looks at the 3.
+    /// - URLs and emails go first, before anything else gets a chance to pick apart the dots,
+    ///   colons, slashes and digits inside one — a bare "3.14" rule would happily eat the
+    ///   "3.14" out of a path, and the abbreviation rule would see "St." inside a hostname.
+    /// - Abbreviations go next so "Dec. 3rd" is a month before anything looks at the 3.
     /// - Currency precedes plain numbers so "$1,234.56" is one amount, not a number and a
     ///   stray decimal.
     /// - Phone numbers and dates precede ranges, because both contain a digit-hyphen-digit
@@ -51,9 +54,11 @@ public struct TextNormalizer: Sendable {
     /// - Ranges precede the general number rules, which would turn the digits into words and
     ///   leave the hyphen behind as a pause.
     /// - Units precede the number rules so "2000Hz" is a frequency rather than a year.
-    /// - Hyphen splitting goes last, after every rule that wanted to see a hyphen.
+    /// - Hyphen splitting goes last, after every rule that wanted to see a hyphen — including
+    ///   this one, so a hyphenated host label ("my-site.com" -> "my site dot com") reads the
+    ///   same way any other hyphenated compound does.
     public func normalize(_ text: String) -> String {
-        var out = text
+        var out = expandURLsAndEmails(text)
 
         if options.expandAbbreviations {
             out = expandAbbreviations(out)
@@ -76,6 +81,103 @@ public struct TextNormalizer: Sendable {
         }
 
         return collapseWhitespace(out)
+    }
+
+    // MARK: - URLs and emails
+
+    /// What a person actually says reading a URL aloud: the host, and nothing else. Nobody
+    /// speaks a protocol ("h t t p s colon slash slash"), and a path or query string is
+    /// essentially never worth hearing — "nytimes.com/2026/09/18/tech" is "nytimes dot com"
+    /// with the date-shaped path silently dropped, not read digit by digit. Saying less here
+    /// is the deliberate choice: a path read aloud is noise nobody wants, where a dropped path
+    /// costs nothing a listener would have used. "www." is dropped for the same reason as the
+    /// protocol — nobody says it — but the rest of the host is kept and spoken as
+    /// dot-separated words, because the host is the one part of a URL that carries meaning.
+    ///
+    /// A bare domain with no scheme and no "www." ("example.com" sitting in a sentence) is
+    /// only recognized against a fixed list of common TLDs. Every other rule in this type can
+    /// use a shape (a `$`, a `:`, a four-digit run) that is unambiguous on its own; "word.word"
+    /// is not — it is also how a sentence ends before a capitalized abbreviation, or an
+    /// abbreviation like "Mr." or "e.g." sits before the next word. The TLD whitelist is what
+    /// keeps those from being mistaken for a domain. `https://` and `www.` URLs carry their
+    /// own unambiguous signal and need no such whitelist.
+    ///
+    /// Runs before every other stage — see `normalize` — so a URL's dots, colons, digits and
+    /// slashes are read out as a whole here rather than being picked apart piecemeal by the
+    /// currency, time, version-string and number rules downstream.
+    ///
+    /// The bare-domain TLD list is kept short and unambiguous on purpose — it stands in for a
+    /// judgment call, and a missed rare TLD is a far cheaper mistake than a wrongly claimed
+    /// sentence boundary.
+    private func expandURLsAndEmails(_ text: String) -> String {
+        var out = text
+
+        // guy@example.com -> "guy at example dot com". Ahead of the URL rules below: an
+        // email's domain looks exactly like a bare domain, and the "www." rule would have no
+        // opinion about it while still leaving the "@" behind for the phonemizer to spell out.
+        out = out.replacing(/\b([A-Za-z0-9._%+-]+)@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)\b/) { match in
+            let local = String(match.1).replacing(".", with: " dot ")
+            let domain = String(match.2).split(separator: ".").map(String.init).joined(separator: " dot ")
+            return "\(local) at \(domain)"
+        }
+
+        // https://example.com/docs, http://www.example.com -> "example dot com". The scheme
+        // is never spoken; whatever follows the host (path, query, fragment, port) is dropped.
+        out = out.replacing(/\bhttps?:\/\/(\S+)/) { match in
+            Self.spokenHost(String(match.1))
+        }
+
+        // www.example.com/docs -> "example dot com" — same reasoning, no scheme this time.
+        out = out.replacing(/\bwww\.(\S+)/) { match in
+            Self.spokenHost("www." + String(match.1))
+        }
+
+        // A bare domain with no scheme and no "www.": only recognized against a known TLD, so
+        // an ordinary sentence boundary or abbreviation is never mistaken for one.
+        out = out.replacing(
+            /\b([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\.(?:com|org|net|edu|gov|mil|io|co|ai|app|dev|info|biz|me|tv|us|uk))\b(\/\S*)?/
+        ) { match in
+            let domain = String(match.1).split(separator: ".").map(String.init).joined(separator: " dot ")
+            guard let path = match.2 else { return domain }
+            return domain + Self.trailingPunctuation(String(path))
+        }
+
+        return out
+    }
+
+    /// What follows a `https://` scheme or a `www.` prefix: an optional (already-included)
+    /// "www.", then a host, then whatever comes after it. Strips the "www.", cuts at the first
+    /// path/query/fragment/port delimiter, and reads what remains as dot-separated words —
+    /// while salvaging any sentence punctuation glued directly onto the end, which otherwise
+    /// belongs to the sentence and not the URL and must not be silently dropped along with it.
+    private static func spokenHost(_ rest: String) -> String {
+        var body = rest
+        if body.lowercased().hasPrefix("www.") {
+            body = String(body.dropFirst(4))
+        }
+        let trailing = trailingPunctuation(body)
+        if !trailing.isEmpty {
+            body.removeLast(trailing.count)
+        }
+        if let cut = body.firstIndex(where: { "/?#:".contains($0) }) {
+            body = String(body[body.startIndex..<cut])
+        }
+        let labels = body.split(separator: ".").map(String.init)
+        guard !labels.isEmpty else { return rest }
+        return labels.joined(separator: " dot ") + trailing
+    }
+
+    /// The run of sentence punctuation glued onto the very end of a string, if any —
+    /// "example.com." at a sentence's end, "example.com," mid-list, "(example.com)" in an
+    /// aside. A URL never legitimately ends in one of these itself, so whatever trails is the
+    /// surrounding sentence's, and must be read back out rather than vanish with a dropped path.
+    private static func trailingPunctuation(_ text: String) -> String {
+        var trailing = ""
+        for char in text.reversed() {
+            guard ".,;:!?)]}\"'".contains(char) else { break }
+            trailing = String(char) + trailing
+        }
+        return trailing
     }
 
     // MARK: - Abbreviations
