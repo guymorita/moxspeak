@@ -56,9 +56,35 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 APP_NAME="MoxSpeak"
 BUNDLE_ID="com.moxspeak.menubar"
-VERSION="0.1.0"
 BUILD_DIR="build"
 APP="${BUILD_DIR}/${APP_NAME}.app"
+
+# --- Version identity ---------------------------------------------------------------
+#
+# Three numbers, each answering a different question — see Sources/MoxSpeakApp/AppVersion.swift
+# for how they are parsed and rendered ("0.4.0 (84) · 1dbb02b"):
+#
+#   VERSION      human-meaningful release, from the VERSION file at the repo root.
+#                Bumped deliberately when something meaningful ships, not on every commit.
+#   BUILD_NUMBER git commit count. Automatic and monotonic — this is what macOS requires
+#                of CFBundleVersion, which a hand-maintained number is not guaranteed to be.
+#   COMMIT_SHA   short commit SHA. This is the part that actually matters in a bug report:
+#                it traces a build back to the exact code that produced it.
+#
+# A tree with uncommitted changes gets "-dirty" appended to the SHA rather than to the
+# build number: CFBundleVersion has to stay a plain integer for macOS to treat it as
+# monotonic, so the dirty marker lives only in the human-readable custom key and is
+# reconstructed for display by AppVersion (a "+" after the build number) from that suffix.
+VERSION="$(cat VERSION 2>/dev/null || echo "0.0.0")"
+BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo "0")"
+COMMIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+# Untracked files intentionally excluded — a stray scratch file sitting in the tree
+# should not brand every build "dirty"; what matters is whether committed content
+# differs from what is checked in.
+if [[ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+  COMMIT_SHA="${COMMIT_SHA}-dirty"
+fi
+echo "==> version ${VERSION} (${BUILD_NUMBER}) · ${COMMIT_SHA}"
 
 echo "==> swift build -c release"
 swift build -c release --product MoxSpeakApp
@@ -155,7 +181,9 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
 	<key>CFBundleShortVersionString</key>
 	<string>${VERSION}</string>
 	<key>CFBundleVersion</key>
-	<string>${VERSION}</string>
+	<string>${BUILD_NUMBER}</string>
+	<key>MoxSpeakCommitSHA</key>
+	<string>${COMMIT_SHA}</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<!-- Menu bar only: no Dock icon, no app switcher entry. -->
