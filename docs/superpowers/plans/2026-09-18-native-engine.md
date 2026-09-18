@@ -218,7 +218,54 @@ something observed rather than a guess.
 
 ---
 
-## Phase 4 — Let the provider set the chunk size
+## Phase 3b — NativeSpeechProvider ✅ *(done 2026-09-18)*
+
+253 tests. Core still builds with zero MLX objects; native suites **skip** rather than fail
+when `Models/` is absent.
+
+**Statelessness proven — after the test itself was caught lying.** The first version
+asserted on resident memory and **passed with a real 17 MB-per-call cache in place**: malloc
+holds ~15 MB of unreturned slack, so RSS moved only 2.2 MB. Rewritten to assert on live
+malloc bytes (sensitive) *and* resident (catches leaks that skip malloc).
+
+- Red with cache in: heap +17.1 MB against a 4 MB limit.
+- Green with cache out: heap +0.1 MB.
+- **200-utterance soak: 92.9 MB of audio through, heap +0.6 MB, run 200 at 1.01× run 5.**
+
+That is the fifth test in this project caught passing with the thing it tested removed.
+
+**`recommendedCharacterCap = 100`, and the reasoning inverted.** There is no fixed cost per
+synthesis to amortize — release timing is linear, 0.229–0.251 s per 100 chars from 40 to 400.
+So latency does not set the cap. Memory does (1.2 GB @60, 1.7 GB @100, 2.1 GB @150, 2.8 GB
+@400) together with language: ~100 chars is the smallest chunk that still holds a whole
+English sentence.
+
+**Two findings that change how we think about the engine:**
+
+- **MLX's CPU path is not a fallback.** `Device.withDefaultDevice(.cpu)` is ~185× slower
+  *and computes different audio* — 48,000 samples against 85,800 for the same sentence.
+  Losing Metal would change how the app sounds, not merely its speed.
+- **"Synthesis is a pure function of (phonemes, voice)" is false.** Kokoro's decoder draws
+  Gaussian noise from MLX's global RNG, so repeat calls differ byte-wise. Nothing
+  accumulates, so statelessness holds, but output is not deterministic without seeding.
+
+**Could not be constrained, and was not faked:** thread count — mlx-swift 0.30.2 exposes no
+such control, and `VECLIB_MAXIMUM_THREADS` at 1/2/4/8 changed nothing (62.6 s across the
+board). The plan's "4 threads" and "2 threads" rows are therefore not implemented. What was
+measurable instead:
+
+| configuration | TTFA |
+|---|---|
+| unconstrained | 0.359 s |
+| no buffer cache | 0.482 s |
+| 512 MB MLX ceiling | 0.399 s |
+| 256 MB + no cache | 0.734 s |
+
+Even the pessimistic floor beats today's HTTP server by 2.7×.
+
+---
+
+## Phase 4 — Let the provider set the chunk size, and bound MLX's memory
 
 The 150-character cap exists *only* as a workaround for the PyTorch-MPS truncation bug. Native has no such limit, and a smaller first chunk means faster first sound.
 
@@ -226,7 +273,17 @@ The 150-character cap exists *only* as a workaround for the PyTorch-MPS truncati
 
 Re-tune the native first-chunk size against measured time-to-first-sound rather than guessing.
 
-**Done when:** the HTTP provider still gets 150, the native provider gets its own measured value, and a test pins that the session honours the provider.
+**Also in this phase, from Phase 3b's findings:** set an **MLX memory ceiling**. Peak
+memory is currently unbounded and reaches 1.7 GB at a 100-character chunk — fine on a 64 GB
+machine, uncomfortable on an 8 GB Air with a browser open. The envelope suite measured a
+512 MB ceiling costing only +11% latency (0.399 s vs 0.359 s), which is a good trade for
+bounding memory on exactly the machines we said we cared about.
+
+Note also that `Segmenter.Options.firstChunkCap` (already 100) is what actually governs
+time-to-first-sound; `recommendedCharacterCap` can only lower it.
+
+**Done when:** the HTTP provider still gets 150, the native provider gets its own measured
+value, a test pins that the session honours the provider, and peak memory is bounded.
 
 ---
 
