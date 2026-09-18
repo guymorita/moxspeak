@@ -13,7 +13,23 @@ Everything below serves one of these. If a task serves none, it does not belong.
 2. **Fast.** Sub-half-second to first sound. The spike measured 0.359s native against
    1.949s for the current server, on an M2 Max.
 3. **Stateless.** Run 200 is as fast as run 1. The old engine leaked ~28 MB per request; this must be structurally impossible to regress into, and proven by a test.
-4. **Durable.** Still builds and runs in three years. Minimize and pin what can move underneath us.
+4. **Durable.** Still builds and runs in three years. Minimize and pin what can move
+   underneath us.
+5. **Works across macOS versions.** Deployment target stays `.macOS(.v14)`. The owner runs
+   14.6 on one machine and **macOS 26** on another, and both must work. Prefer
+   version-agnostic APIs; where something recent is needed, guard with `if #available` and
+   provide a fallback rather than raising the floor for everyone.
+
+   **The open risk here is Carbon.** `RegisterEventHotKey` is the only global-hotkey API
+   that needs no Accessibility permission — the reason this app installs without prompts —
+   and it has been deprecated for over a decade. If it has been removed in macOS 26, global
+   hotkeys break there and the design needs rethinking. Testing the current build on the
+   macOS 26 machine settles it cheaply and should happen before more is built on the
+   assumption. The migration path, if needed, is `CGEventTap` plus an Accessibility prompt —
+   which costs the no-permission property.
+
+   Also unverified across versions: SF Symbol availability for the menu bar gem, and whether
+   a prebuilt `.metallib` is portable across OS versions and GPU generations.
 
 ## Standing constraints
 
@@ -253,4 +269,11 @@ The HUD with its scrub bar, sentence-level navigation, memory spill-to-disk, and
 
 - **MLX / `xcodebuild`** — the main durability threat. Phase 2 is designed to avoid it if the measurement allows.
 - **Heteronyms** — "read" past vs present comes from POS tagging, which normalization cannot fix. Two of 28 in the spike. Accepted; revisit if it grates in use.
-- **Carbon hotkeys** are long-deprecated but are the only no-permission global hotkey API. Accepted, with the migration path being `CGEventTap` plus an Accessibility prompt if Apple ever removes it.
+- **Carbon hotkeys** are long-deprecated but are the only no-permission global hotkey API.
+  Accepted, with the migration path being `CGEventTap` plus an Accessibility prompt if Apple
+  ever removes it — at the cost of the no-permission property. **Unverified on macOS 26;
+  test before relying on it further.**
+- **Notarization.** Developer ID signing alone is not enough to run on another Mac:
+  `spctl` reports `rejected — source=Unnotarized Developer ID`, so a copied build needs
+  right-click-Open or the quarantine attribute cleared. Notarization becomes necessary if
+  this is ever shared publicly.
