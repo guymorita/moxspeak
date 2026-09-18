@@ -10,7 +10,12 @@
 Everything below serves one of these. If a task serves none, it does not belong.
 
 1. **Self-contained.** Install MoxSpeak, nothing else. Uninstall it, nothing left behind.
-2. **Fast.** Sub-half-second to first sound. The spike measured 0.359s native against 1.949s for the current server.
+2. **Fast on the weakest plausible Mac, not just the best one.** Sub-half-second to first
+   sound. The spike measured 0.359s native against 1.949s for the current server — but that
+   was on an M2 Max. A base MacBook Air has roughly a quarter the GPU cores, a quarter the
+   memory bandwidth, no fan, and often 8 GB of RAM. The target floor is that machine.
+   A backend that leans on the GPU scales down harder than one that leans on the CPU, so
+   "fastest on the M2 Max" is explicitly **not** the selection criterion.
 3. **Stateless.** Run 200 is as fast as run 1. The old engine leaked ~28 MB per request; this must be structurally impossible to regress into, and proven by a test.
 4. **Durable.** Still builds and runs in three years. Minimize and pin what can move underneath us.
 
@@ -44,7 +49,22 @@ The one genuinely open decision, and the biggest durability risk in the plan.
 
 **Task:** run ONNX Runtime against the identical corpus and method the spike used for MLX — same sentences, unique text per run, median of 6, time to first audio.
 
-**Decision rule, set before seeing the number so it can't be rationalized:** if ONNX lands within 100ms of MLX, take ONNX for the build-system longevity. If it is more than 100ms slower, take MLX and accept `xcodebuild`.
+**Decision rule, set before seeing the number so it can't be rationalized:** prefer the
+backend that is fast enough on the weakest plausible machine, not the fastest on the
+strongest. If ONNX lands within 100ms of MLX on this machine **and** degrades more
+gracefully under constraint, take ONNX — its SPM build story and its CPU scaling both
+favour longevity and low-end hardware. Take MLX only if it is clearly faster *and* its
+advantage does not appear to depend on having a large GPU.
+
+**Quantization is part of this decision, not a footnote.** int8 (88 MB) and fp16 (169 MB)
+weights matter disproportionately on weak hardware — less memory bandwidth consumed, a
+smaller resident footprint on an 8 GB machine, and a smaller bundle. Measure latency and
+spectral quality for f32, fp16 and int8. A quantized model that is meaningfully faster and
+spectrally indistinguishable from f32 is very likely the right shipping choice even if f32
+wins on the development machine.
+
+Also report **peak resident memory during synthesis** for each configuration; on an 8 GB
+Air that is a real constraint and it cannot be inferred from latency.
 
 **Done when:** a number exists and the decision is recorded with its reasoning.
 
