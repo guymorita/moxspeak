@@ -80,3 +80,23 @@ import Foundation
     #expect(p.prepare("") == "")
     #expect(p.prepare("   \n\n  ") == "")
 }
+
+// MARK: - Object placeholders
+
+@Test func objectPlaceholdersAreRemoved() {
+    // A browser puts U+FFFC in a selection wherever it crossed something that is not
+    // text. Selecting the GitHub heading "Read Aloud TTS with Kokoro" picks up the
+    // invisible anchor link that follows it and hands over exactly this.
+    let preparer = TextPreparer()
+    #expect(preparer.prepare("Read Aloud TTS with Kokoro\u{FFFC}") == "Read Aloud TTS with Kokoro")
+}
+
+@Test func aSelectionOfNothingButPlaceholdersPreparesToNothing() {
+    let preparer = TextPreparer()
+    #expect(preparer.prepare("\u{FFFC}\u{FFFC}") == "")
+}
+
+@Test func placeholdersInsideProseDoNotEatTheSpacesAroundThem() {
+    let preparer = TextPreparer()
+    #expect(preparer.prepare("before \u{FFFC} after") == "before after")
+}

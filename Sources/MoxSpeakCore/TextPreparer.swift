@@ -55,6 +55,7 @@ public struct TextPreparer: Sendable {
         if options.stripEmoji {
             text = stripEmoji(text)
         }
+        text = stripObjectPlaceholders(text)
         text = normalizePunctuation(text)
 
         return collapseWhitespace(text)
@@ -124,6 +125,22 @@ public struct TextPreparer: Sendable {
               || scalar.value == 0xFE0F)
         }
         return String(String.UnicodeScalarView(kept))
+    }
+
+    /// Removes U+FFFC OBJECT REPLACEMENT CHARACTER.
+    ///
+    /// Selected text that arrives from a browser carries one of these wherever the
+    /// selection crossed something that is not text — an image, a button, or the
+    /// invisible anchor link GitHub wraps every markdown heading in, which is how a user
+    /// who selects the heading "Read Aloud TTS with Kokoro" ends up holding
+    /// "Read Aloud TTS with Kokoro\u{FFFC}".
+    ///
+    /// It belongs here and not in `SelectionReader` for the same reason every other
+    /// stripping rule does: this is the one stage that owns turning a document into
+    /// prose. A second stripper growing quietly inside the selection reader is how the
+    /// two start disagreeing about what the engine is allowed to see.
+    private func stripObjectPlaceholders(_ text: String) -> String {
+        text.replacing("\u{FFFC}", with: "")
     }
 
     private func normalizePunctuation(_ text: String) -> String {
