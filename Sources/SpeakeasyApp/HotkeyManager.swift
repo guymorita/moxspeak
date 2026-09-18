@@ -1,6 +1,18 @@
 import AppKit
 import Carbon.HIToolbox
 
+/// Our own four-character signature, so hotkey ids cannot collide with another
+/// component's inside the same process.
+///
+/// File scope rather than a `static` on `HotkeyManager`, and that placement is the point.
+/// The Carbon callback below is a bare C function and therefore `nonisolated`, so it
+/// cannot read a `static let` that lives on a `@MainActor` type. The previous version
+/// worked around that by writing the literal `0x53_50_4B_59` a second time inside the
+/// callback and comparing against it — two copies of one constant, in two places, where
+/// the only symptom of them drifting apart is a hotkey that silently never fires. One
+/// constant, visible to both, removes that failure mode by construction.
+private let speakeasyHotkeySignature: OSType = 0x53_50_4B_59  // 'SPKY'
+
 /// Global hotkeys, via Carbon's `RegisterEventHotKey`.
 ///
 /// ## Why Carbon, in 2026
@@ -17,12 +29,35 @@ import Carbon.HIToolbox
 /// account, no permissions dialog. The deprecation warnings Carbon collects are a price
 /// worth paying for it.
 ///
+/// ## Why every step of the path is logged
+///
+/// A hotkey is the one part of this app with no visible surface. There is no button that
+/// looked pressed, no window that failed to open — the user presses a key combination and
+/// either something happens or nothing does. That makes a *working* hotkey and a *dead*
+/// one produce exactly the same evidence unless the code says which one it is.
+///
+/// This was not hypothetical. An earlier version logged registration and nothing else,
+/// and was reported as broken on the strength of a log that stopped at launch: pressing
+/// the combination appeared to do nothing, because a successful firing wrote no line
+/// anywhere. Under instrumentation the whole path — callback, parameter fetch, signature,
+/// dispatch, handler — turned out to run correctly every time. The bug was the silence.
+///
+/// So the firing path logs, permanently: once when a hotkey fires, and once for each way
+/// the Carbon callback can decline an event. Nothing on this path is allowed to return
+/// `eventNotHandledErr` without saying why.
+///
 /// ## Why registration failure is loud
 ///
-/// `RegisterEventHotKey` fails when another running application already owns the
-/// combination, and the failure is total and silent: the key simply does nothing forever
-/// and the user has no way to tell that from a broken app. Every registration result is
-/// therefore surfaced to the caller, which puts it in front of the user.
+/// `RegisterEventHotKey` can refuse, and the refusal is total and silent: the key simply
+/// does nothing forever and the user has no way to tell that from a broken app. Every
+/// registration result is therefore surfaced to the caller, which puts it in front of the
+/// user.
+///
+/// Worth knowing what this does *not* buy, so nobody reads more into a `noErr` than it
+/// means: registering a combination another running process already holds succeeds. Two
+/// processes were run side by side on ⌥⇧S, both registrations returned `noErr`, and both
+/// handlers fired on the same keystroke. So a successful registration is not a claim of
+/// exclusivity, and a stolen-looking hotkey will not show up here as an error.
 @MainActor
 final class HotkeyManager {
 
@@ -56,12 +91,16 @@ final class HotkeyManager {
         }
     }
 
-    /// Our own four-character signature, so hotkey ids cannot collide with another
-    /// component's inside the same process.
-    private static let signature: OSType = 0x53_50_4B_59  // 'SPKY'
+    /// What one registered id maps to. The label is carried alongside the handler purely
+    /// so the log line at firing time can name the combination the user actually pressed
+    /// — "⌥⇧S fired" is a fact about the world, "id 1 fired" is a fact about this file.
+    private struct Registration {
+        let label: String
+        let reference: EventHotKeyRef
+        let handler: @MainActor () -> Void
+    }
 
-    private var handlers: [UInt32: @MainActor () -> Void] = [:]
-    private var registrations: [UInt32: EventHotKeyRef] = [:]
+    private var registrations: [UInt32: Registration] = [:]
     private var eventHandler: EventHandlerRef?
     private var nextID: UInt32 = 1
 
@@ -78,7 +117,7 @@ final class HotkeyManager {
         let id = nextID
         nextID += 1
 
-        let hotKeyID = EventHotKeyID(signature: Self.signature, id: id)
+        let hotKeyID = EventHotKeyID(signature: speakeasyHotkeySignature, id: id)
         var reference: EventHotKeyRef?
         let status = RegisterEventHotKey(shortcut.keyCode,
                                          shortcut.modifiers,
@@ -90,8 +129,9 @@ final class HotkeyManager {
             throw Failure.alreadyTaken(shortcut: shortcut, status: status)
         }
 
-        registrations[id] = reference
-        handlers[id] = handler
+        registrations[id] = Registration(label: shortcut.label,
+                                         reference: reference,
+                                         handler: handler)
         AppLog.write("hotkey: registered \(shortcut.label) as id \(id)")
     }
 
@@ -114,9 +154,18 @@ final class HotkeyManager {
     }
 
     /// Called from the Carbon callback below, already on the main thread.
+    ///
+    /// The log line here is the permanent one: it is the only proof, from outside the
+    /// process, that a keystroke made it all the way through Carbon and into this app.
     fileprivate func fire(id: UInt32) {
-        guard let handler = handlers[id] else { return }
-        handler()
+        guard let registration = registrations[id] else {
+            // Our signature but not our id. Cannot happen as long as ids only come from
+            // `register`, which is exactly why it is worth hearing about if it ever does.
+            AppLog.write("hotkey: fired with unknown id \(id) — ignored")
+            return
+        }
+        AppLog.write("hotkey: \(registration.label) fired")
+        registration.handler()
     }
 }
 
@@ -132,7 +181,10 @@ final class HotkeyManager {
 private func speakeasyHotkeyHandler(_ callRef: EventHandlerCallRef?,
                                     _ event: EventRef?,
                                     _ userData: UnsafeMutableRawPointer?) -> OSStatus {
-    guard let event, let userData else { return OSStatus(eventNotHandledErr) }
+    guard let event, let userData else {
+        AppLog.write("hotkey: callback reached with no event or no manager — ignored")
+        return OSStatus(eventNotHandledErr)
+    }
 
     var hotKeyID = EventHotKeyID()
     let status = GetEventParameter(event,
@@ -142,7 +194,15 @@ private func speakeasyHotkeyHandler(_ callRef: EventHandlerCallRef?,
                                    MemoryLayout<EventHotKeyID>.size,
                                    nil,
                                    &hotKeyID)
-    guard status == noErr, hotKeyID.signature == 0x53_50_4B_59 else {
+    guard status == noErr else {
+        AppLog.write("hotkey: could not read the hotkey id off the event (OSStatus \(status))")
+        return OSStatus(eventNotHandledErr)
+    }
+
+    // A different signature is somebody else's hotkey arriving on the shared application
+    // event target. Declining it is correct and routine, so it stays quiet — this is the
+    // one silent exit on this path, and it is silent because it is not a failure.
+    guard hotKeyID.signature == speakeasyHotkeySignature else {
         return OSStatus(eventNotHandledErr)
     }
 

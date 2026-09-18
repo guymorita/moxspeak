@@ -132,6 +132,7 @@ final class AppController {
             idleNote = "Nothing to speak — the clipboard has no text"
             lastError = nil
             refresh()
+            AppLog.write("speak: nothing to say — the clipboard holds no text")
             return
         }
         speak(text)
@@ -158,6 +159,7 @@ final class AppController {
         isPlaying = true
         nowPlaying.beginPlaying(title: NowPlayingController.title(for: text), rate: rate)
         refresh()
+        AppLog.write("speak: \(text.count) characters in \(voice) at \(rate)×")
 
         playback = Task { [weak self] in
             await self?.pump(text: text, engine: engine)
@@ -167,6 +169,7 @@ final class AppController {
     func togglePause() {
         guard isPlaying, let engine else {
             menuBar?.flash("Nothing is playing")
+            AppLog.write("pause: nothing is playing")
             return
         }
         if engine.isPaused {
@@ -176,6 +179,7 @@ final class AppController {
         }
         nowPlaying.setPaused(engine.isPaused)
         refresh()
+        AppLog.write(engine.isPaused ? "pause: paused" : "pause: resumed")
     }
 
     func stop() {
@@ -271,6 +275,8 @@ final class AppController {
     }
 
     private func finish(failures: [String], chunkCount: Int, heardAnything: Bool) {
+        AppLog.write("speak: finished \(chunkCount) chunk\(chunkCount == 1 ? "" : "s"), "
+                     + "\(failures.count) failed, heard something: \(heardAnything)")
         isPlaying = false
         engine?.stop()
         engine = nil
