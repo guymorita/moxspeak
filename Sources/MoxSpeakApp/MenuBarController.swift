@@ -27,6 +27,7 @@ final class MenuBarController: NSObject {
         var stop: @MainActor () -> Void
         var selectVoice: @MainActor (String) -> Void
         var selectRate: @MainActor (Float) -> Void
+        var selectEngine: @MainActor (EngineChoice) -> Void
         var enableSelectToSpeak: @MainActor () -> Void
         /// Fired every time the menu is about to appear. The controller uses it to
         /// re-read state that can change behind the app's back — Accessibility, which
@@ -50,6 +51,7 @@ final class MenuBarController: NSObject {
     private let stopItem = NSMenuItem()
     private let voiceItem = NSMenuItem()
     private let rateItem = NSMenuItem()
+    private let engineChoiceItem = NSMenuItem()
     private let engineItem = NSMenuItem()
     private let warningItem = NSMenuItem()
     private let selectToSpeakItem = NSMenuItem()
@@ -107,6 +109,13 @@ final class MenuBarController: NSObject {
         rateItem.title = "Speed"
         rateItem.submenu = buildRateMenu()
         menu.addItem(rateItem)
+
+        // Beside Voice and Speed, because it is the same kind of thing: a preference the
+        // user owns, that persists, and that takes effect immediately. Filled in by
+        // `setEngines` before the menu is ever shown.
+        engineChoiceItem.title = "Engine"
+        engineChoiceItem.submenu = NSMenu()
+        menu.addItem(engineChoiceItem)
 
         menu.addItem(.separator())
 
@@ -246,6 +255,38 @@ final class MenuBarController: NSObject {
         voiceItem.submenu = submenu
     }
 
+    /// Replaces the engine submenu and names the current choice in the parent row.
+    ///
+    /// The parent says "Engine: Built in" rather than plain "Engine" so the answer is
+    /// visible without opening a submenu. Which engine is speaking changes what the app
+    /// depends on — a running server or nothing at all — and that is not something the
+    /// user should have to go looking for.
+    func setEngines(_ choices: [EngineChoice], selected: EngineChoice, port: Int) {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for choice in choices {
+            let item = NSMenuItem(title: choice.menuTitle(port: port),
+                                  action: #selector(selectEngine(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.isEnabled = true
+            item.toolTip = choice.menuDetail(port: port)
+            item.representedObject = choice.rawValue as NSString
+            item.state = (choice == selected) ? .on : .off
+            submenu.addItem(item)
+        }
+        engineChoiceItem.submenu = submenu
+        engineChoiceItem.title = "Engine: \(selected.shortName)"
+    }
+
+    func setSelectedEngine(_ choice: EngineChoice) {
+        for item in engineChoiceItem.submenu?.items ?? [] {
+            item.state = ((item.representedObject as? NSString) as String? == choice.rawValue)
+                ? .on : .off
+        }
+        engineChoiceItem.title = "Engine: \(choice.shortName)"
+    }
+
     func setSelectedVoice(_ id: String) {
         for item in voiceItem.submenu?.items ?? [] {
             item.state = ((item.representedObject as? NSString) as String? == id) ? .on : .off
@@ -320,6 +361,12 @@ final class MenuBarController: NSObject {
     @objc private func selectRate(_ sender: NSMenuItem) {
         guard let rate = (sender.representedObject as? NSNumber)?.floatValue else { return }
         actions.selectRate(rate)
+    }
+
+    @objc private func selectEngine(_ sender: NSMenuItem) {
+        guard let raw = (sender.representedObject as? NSString) as String?,
+              let choice = EngineChoice(rawValue: raw) else { return }
+        actions.selectEngine(choice)
     }
 }
 

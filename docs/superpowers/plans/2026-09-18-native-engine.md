@@ -323,7 +323,7 @@ and metallib and synthesized 5.92 s of real audio (peak 0.396 of full scale). Re
 one of the three bundled asset groups makes it fail, so the check is not vacuous.
 Details in `.superpowers/phase5-report.md`.
 
-The app *links* the native engine now; it still *drives* the HTTP one. Switching is Phase 6.
+The app *links* the native engine here; Phase 6 makes it *drive* it.
 
 
 - Model weights, lexicon and voice data ship **inside the `.app`**. No Application Support directory, no download on first run, works offline.
@@ -340,13 +340,41 @@ The app *links* the native engine now; it still *drives* the HTTP one. Switching
 
 ---
 
-## Phase 6 — Native becomes the default, server stays selectable
+## Phase 6 — Native becomes the default, server stays selectable ✅ *(done 2026-09-18)*
 
-- Engine choice in the menu, persisted alongside voice and speed.
-- Native is the default; the HTTP provider remains for pointing at a remote or a beefier engine.
-- Engine switching takes effect without a restart.
+**Property 1 and property 2 are now true through the real app.** Kokoro stopped, `build/`
+launched directly: `app: started on the native engine`, 46 voices, warmed up in 1.23 s, and
+⌥⇧S spoke. **Median time to first sound 0.323 s** over 8 runs with unique text (0.281 –
+0.345), against ~1.95 s for the HTTP path. 285 tests.
 
-**Done when:** a fresh launch with no server running speaks correctly, and switching to the HTTP engine still works when one is available.
+Engine choice lives in the menu beside Voice and Speed, is persisted under the `engine`
+key, and switches without a restart — `AppController` replaces an `EngineRuntime`
+(provider *and* session together) rather than mutating either. That pairing is the whole
+mechanism: `SpeechSession` reads `recommendedCharacterCap` and `requiresTextNormalization`
+exactly once, at construction, so a session that outlived an engine change would keep
+chunking and normalizing for the engine it no longer talks to. The switch writes both
+numbers to the log, observed live:
+
+    engine: switched to http — Kokoro server on 127.0.0.1:8880; chunk cap 150 characters, text normalization off
+    engine: switched to native — Built in — no server needed; chunk cap 100 characters, text normalization on
+
+**The 72-to-46 migration, exercised rather than reasoned about.** Stored `ef_dora`
+(Spanish, one of the 26 the bundle does not ship), switched to native:
+
+    settings: stored voice ef_dora is not among the 46 voices the native engine offers —
+    speaking as af_bella this session; ef_dora stays saved and returns on an engine that has it
+
+…and switching back restored it (`stored voice ef_dora is available on the http engine —
+restored`). That round trip needed a fix: `loadVoices` re-resolved from the voice *in use*
+rather than from the stored preference, so the first fallback would have been permanent
+for the session even after switching back to an engine that had the voice. Resolving from
+`settings.storedVoice` is what makes the existing "not written back" comment true.
+
+Also per-engine now, because one number was wrong for one of them: `EngineHealth`'s slow
+threshold (native 1.25 s, HTTP 2.5 s) and its advice — there is no server to restart when
+the engine is this process.
+
+Details, including the unreachable-server transcript, in `.superpowers/phase6-report.md`.
 
 ---
 

@@ -5,10 +5,11 @@ import MoxSpeakNative
 /// `MOXSPEAK_SELFTEST=1 MoxSpeak.app/Contents/MacOS/MoxSpeak` — proves the installed app
 /// can speak using nothing but itself, then exits without ever creating a menu bar item.
 ///
-/// This exists because "self-contained" is otherwise unfalsifiable from the outside. The
-/// app currently *uses* the HTTP engine (switching is the next phase), so launching it
-/// normally exercises none of the bundled assets and would happily pass on a machine where
-/// the weights resolve out of somebody's checkout. This path loads the bundled model, the
+/// This exists because "self-contained" is otherwise unfalsifiable from the outside. Even
+/// now that the native engine is the default, a normal launch resolves its assets through
+/// `NativeModelAssets.defaultDirectory`, which happily falls through to a developer's
+/// checkout — so an app that works here proves nothing about an app that has been dragged
+/// to another machine. This path loads the bundled model, the
 /// bundled voice, the bundled lexicon and the bundled metallib, synthesizes real audio, and
 /// reports where every one of those came from — so moving the repository's `Models/`
 /// directory aside and re-running it is a test that can actually fail.

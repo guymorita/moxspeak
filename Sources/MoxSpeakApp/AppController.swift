@@ -12,8 +12,19 @@ import MoxSpeakCore
 final class AppController {
 
     private let port: Int
-    private let provider: OpenAICompatibleProvider
-    private let session: SpeechSession
+
+    /// The engine currently in use, and the session built around it. Replaced wholesale
+    /// when the user picks a different engine — see `selectEngine`.
+    private var runtime: EngineRuntime
+    private var engineChoice: EngineChoice
+
+    /// Bumped every time the engine changes. In-flight work carries the value it was
+    /// started under, so a voice list (or a warm-up) that arrives after the user has
+    /// moved on is discarded rather than applied to an engine it does not describe.
+    /// Without it, a 30-second HTTP timeout landing after a switch to native would
+    /// overwrite the native voice list with a failure that has nothing to do with it.
+    private var engineGeneration = 0
+
     private let hotkeys = HotkeyManager()
     private let nowPlaying = NowPlayingController()
     private var menuBar: MenuBarController?
@@ -27,7 +38,9 @@ final class AppController {
     private var engine: PlaybackEngine?
     private var playback: Task<Void, Never>?
 
-    private var health = EngineHealth()
+    /// Rebuilt per engine: what counts as slow, and what a user could do about it, are
+    /// both engine-specific. See `EngineChoice.slowThreshold`.
+    private var health: EngineHealth
 
     /// Persisted across launches. The values below are already the *resolved* ones —
     /// see `Settings` for why what was stored and what is safe to use are not the same
@@ -43,12 +56,23 @@ final class AppController {
     private var lastError: String?
     private var idleNote = "Ready"
     private var hotkeyWarning: String?
+    /// A standing problem with the engine itself — the native model failing to load, say.
+    /// Sits in the menu next to the hotkey warning rather than vanishing into the log.
+    private var engineWarning: String?
 
     init(port: Int, settings: Settings = Settings()) {
         self.port = port
-        self.provider = OpenAICompatibleProvider(config: .kokoroLocal(port: port))
-        self.session = SpeechSession(provider: provider)
         self.settings = settings
+
+        // The engine is settled before anything else, because everything else depends on
+        // it: which voices exist, how large a chunk may be, and whether text is
+        // normalized here or by a server. `resolveEngine` always answers with an engine
+        // this build actually has.
+        let choice = Settings.resolveEngine(stored: settings.storedEngine)
+        self.engineChoice = choice
+        self.runtime = EngineRuntime(choice: choice, port: port)
+        self.health = EngineHealth(slowThreshold: choice.slowThreshold,
+                                   slowHint: choice.slowHint)
 
         // The voice cannot be checked against the engine's list yet — nothing has been
         // asked of the engine at this point — so it is resolved again in `loadVoices`
@@ -68,6 +92,7 @@ final class AppController {
             stop: { [weak self] in self?.stop() },
             selectVoice: { [weak self] in self?.selectVoice($0) },
             selectRate: { [weak self] in self?.selectRate($0) },
+            selectEngine: { [weak self] in self?.selectEngine($0) },
             enableSelectToSpeak: { [weak self] in self?.enableSelectToSpeak() },
             menuWillOpen: { [weak self] in self?.refreshSelectToSpeak() },
             quit: { NSApplication.shared.terminate(nil) }
@@ -75,6 +100,7 @@ final class AppController {
         self.menuBar = menuBar
         menuBar.setVoices([], selected: voice, note: "Loading voices…")
         menuBar.setSelectedRate(rate)
+        menuBar.setEngines(EngineChoice.allCases, selected: engineChoice, port: port)
         refreshSelectToSpeak()
 
         installHotkeys()
@@ -84,11 +110,13 @@ final class AppController {
         nowPlaying.activate()
 
         refresh()
-        Task { await loadVoices() }
-        AppLog.write("app: started, talking to 127.0.0.1:\(port)")
+        AppLog.write("app: started on the \(engineChoice.logName) engine — "
+                     + "\(engineChoice.menuTitle(port: port))")
         AppLog.write("settings: restored voice \(voice) at \(rate)× "
-                     + "(stored: voice=\(settings.storedVoice ?? "none"), "
+                     + "(stored: engine=\(settings.storedEngine ?? "none"), "
+                     + "voice=\(settings.storedVoice ?? "none"), "
                      + "speed=\(settings.storedRate.map { "\($0)" } ?? "none"))")
+        beginEngine()
     }
 
     private func installHotkeys() {
@@ -119,23 +147,77 @@ final class AppController {
         AppLog.write("hotkey: \(hotkeyWarning ?? "")")
     }
 
-    private func loadVoices() async {
+    // MARK: - Engines
+
+    /// Everything that has to happen when an engine starts being the engine: find out
+    /// what voices it has, re-resolve the stored preference against them, and pay the
+    /// model-load cost before the user does.
+    ///
+    /// Sequential, not concurrent: the warm-up has to be handed the voice the user will
+    /// actually be speaking in, and that is not known until the list has come back.
+    private func beginEngine() {
+        engineGeneration += 1
+        let generation = engineGeneration
+        Task { [weak self] in
+            await self?.loadVoices(generation: generation)
+            await self?.warmUpEngine(generation: generation)
+        }
+    }
+
+    /// Switches engines under a running app. Takes effect immediately — no restart.
+    ///
+    /// Anything playing is stopped rather than allowed to finish. The chunks still queued
+    /// were synthesized by the engine being replaced, and the two engines differ in voice
+    /// inventory, chunk size and prosody; letting the tail play would mean the app is
+    /// audibly using an engine the menu says it is not.
+    private func selectEngine(_ choice: EngineChoice) {
+        guard choice != engineChoice else { return }
+
+        let wasPlaying = isPlaying
+        teardownPlayback()
+        if wasPlaying { nowPlaying.clear() }
+
+        engineChoice = choice
+        settings.storedEngine = choice.rawValue
+        runtime = EngineRuntime(choice: choice, port: port)
+        // Neither what counts as slow nor anything measured about the old engine carries
+        // over. Timings from a 2-second server say nothing about a 0.35-second one.
+        health = EngineHealth(slowThreshold: choice.slowThreshold, slowHint: choice.slowHint)
+        engineWarning = nil
+        lastError = nil
+        idleNote = wasPlaying ? "Stopped — switched to \(choice.shortName)" : "Ready"
+
+        menuBar?.setSelectedEngine(choice)
+        menuBar?.setVoices([], selected: voice, note: "Loading voices…")
+
+        // The two things a provider swap is supposed to change, written down at the
+        // moment it happens. `SpeechSession` reads both once at construction, so this
+        // line is the evidence that a new session was actually built rather than the old
+        // one reused — which would leave the previous engine's chunk size and
+        // normalization in force against the new engine.
+        AppLog.write("engine: switched to \(choice.logName) — \(choice.menuTitle(port: port)); "
+                     + "chunk cap \(runtime.session.characterCap) characters, "
+                     + "text normalization \(runtime.session.normalizesText ? "on" : "off")")
+        refresh()
+        beginEngine()
+    }
+
+    private func loadVoices(generation: Int) async {
+        let runtime = self.runtime
+        let choice = runtime.choice
         do {
-            let voices = try await provider.listVoices()
-            health.markReachable()
-            let resolved = Settings.resolveVoice(stored: voice, available: voices.map(\.id))
-            if resolved != voice {
-                // Not written back. The stored preference is left exactly as it is, so a
-                // voice that disappears when someone prunes the engine's model directory
-                // comes back by itself when they put it back. Overwriting here would
-                // quietly make a temporary absence permanent.
-                AppLog.write("settings: stored voice \(voice) is not in the engine's "
-                             + "list — using \(resolved) this session")
-                voice = resolved
+            let voices = try await runtime.provider.listVoices()
+            guard generation == engineGeneration else {
+                AppLog.write("voices: a \(choice.logName) voice list arrived after the "
+                             + "engine changed — discarded")
+                return
             }
+            health.markReachable()
+            applyVoiceList(voices.map(\.id), engine: choice)
             menuBar?.setVoices(voices, selected: voice, note: nil)
-            AppLog.write("voices: loaded \(voices.count)")
+            AppLog.write("voices: the \(choice.logName) engine offers \(voices.count)")
         } catch {
+            guard generation == engineGeneration else { return }
             // Reachable-but-unreadable and not-there-at-all are different problems with
             // different fixes, and reporting the first as the second would send the user
             // to restart an engine that is running fine.
@@ -144,13 +226,73 @@ final class AppController {
                 menuBar?.setVoices([], selected: voice,
                                    note: "Voice list unreadable — using \(voice)")
             } else {
-                health.markUnreachable("nothing answering on 127.0.0.1:\(port)")
-                menuBar?.setVoices([], selected: voice,
-                                   note: "Voice list unavailable — engine unreachable")
+                health.markUnreachable(choice.unreachableReason(port: port))
+                menuBar?.setVoices([], selected: voice, note: choice.voiceListUnavailableNote)
             }
-            AppLog.write("voices: failed — \(error)")
+            AppLog.write("voices: the \(choice.logName) engine's list failed — \(error)")
         }
         refresh()
+    }
+
+    /// Re-resolves the *stored* voice against the list this engine actually offers, and
+    /// says out loud when the answer is not what was stored.
+    ///
+    /// Resolving from `settings.storedVoice` rather than from the voice currently in use
+    /// is the whole point, and it matters at exactly one moment: an engine change. The
+    /// server offers 72 voices; the native engine ships 46, all English, because the
+    /// vendored MisakiSwift carries only the US English lexicon and the other 26 could
+    /// not be phonemized anyway. So a stored non-English voice becomes unavailable the
+    /// moment the engine changes — and has to come back when it changes again.
+    /// Re-resolving from the voice in use would make the first fallback permanent for the
+    /// rest of the session, quietly.
+    ///
+    /// Nothing is written back either way. The stored preference is left exactly as the
+    /// user set it, so an engine that has it again restores it; overwriting here would
+    /// turn a temporary absence into a permanent forgetting.
+    private func applyVoiceList(_ available: [String], engine: EngineChoice) {
+        let stored = settings.storedVoice?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolved = Settings.resolveVoice(stored: stored, available: available)
+        let previous = voice
+        voice = resolved
+
+        guard let stored, !stored.isEmpty else { return }
+
+        if resolved != stored {
+            // Both the log and the menu bar. A user whose voice changed under them must
+            // be able to find out why without being asked to read a log, and must still
+            // be able to find out later if they missed the flash.
+            AppLog.write("settings: stored voice \(stored) is not among the "
+                         + "\(available.count) voices the \(engine.logName) engine offers "
+                         + "— speaking as \(resolved) this session; \(stored) stays saved "
+                         + "and returns on an engine that has it")
+            menuBar?.flash("\(stored) isn't on this engine — using \(resolved)", seconds: 5)
+        } else if previous != stored {
+            AppLog.write("settings: stored voice \(stored) is available on the "
+                         + "\(engine.logName) engine — restored")
+        }
+    }
+
+    /// Loads the model before the first hotkey press does. No-op for engines that are
+    /// somebody else's process.
+    private func warmUpEngine(generation: Int) async {
+        guard generation == engineGeneration else { return }
+        let runtime = self.runtime
+        let voice = self.voice
+        do {
+            guard let seconds = try await runtime.warmUp(voice: voice) else { return }
+            guard generation == engineGeneration else { return }
+            AppLog.write(String(format: "engine: %@ warmed up in %.2fs (voice %@)",
+                                runtime.choice.logName, seconds, voice))
+        } catch {
+            guard generation == engineGeneration else { return }
+            // Not fatal on its own — `synthesize` would try again and fail loudly — but a
+            // warm-up that failed means the first press is going to fail too, and saying
+            // so now is the difference between a puzzling silence and a known problem.
+            engineWarning = "The \(runtime.choice.shortName.lowercased()) engine did not "
+                          + "load — \(Self.describe(error))"
+            AppLog.write("engine: \(runtime.choice.logName) warm-up failed — \(error)")
+            refresh()
+        }
     }
 
     // MARK: - Commands
@@ -193,7 +335,7 @@ final class AppController {
 
         let engine: PlaybackEngine
         do {
-            engine = try PlaybackEngine(format: provider.outputFormat)
+            engine = try PlaybackEngine(format: runtime.provider.outputFormat)
             engine.rate = rate
             try engine.start()
         } catch {
@@ -207,7 +349,8 @@ final class AppController {
         isPlaying = true
         nowPlaying.beginPlaying(title: NowPlayingController.title(for: text), rate: rate)
         refresh()
-        AppLog.write("speak: \(text.count) characters in \(voice) at \(rate)×")
+        AppLog.write("speak: \(text.count) characters in \(voice) at \(rate)× "
+                     + "on the \(engineChoice.logName) engine")
 
         playback = Task { [weak self] in
             await self?.pump(text: text, engine: engine)
@@ -291,6 +434,10 @@ final class AppController {
     /// suspended.
     private func pump(text: String, engine: PlaybackEngine) async {
         let started = Date()
+        // Read once, here: an engine change replaces `runtime` and cancels this task, but
+        // holding the session locally means a half-torn-down utterance can never end up
+        // asking the new engine about the old engine's chunks.
+        let session = runtime.session
         _ = await session.speak(text, voice: voice)
         let chunks = await session.chunks
 
@@ -324,8 +471,19 @@ final class AppController {
                     // Time to first sound is the single number that exposes the engine's
                     // documented slow rot, so it is measured from the moment the user
                     // asked, not from when synthesis happened to begin.
-                    health.record(timeToFirstSound: Date().timeIntervalSince(started))
+                    let elapsed = Date().timeIntervalSince(started)
+                    health.record(timeToFirstSound: elapsed)
                     heardAnything = true
+                    // Audible output is proof the engine loaded, whatever a warm-up said
+                    // earlier. Leaving a stale warning up would be its own silent lie.
+                    engineWarning = nil
+                    // The menu rounds this to one decimal, which is right for a person
+                    // glancing at it and useless for judging an engine against a
+                    // half-second budget. The log keeps the milliseconds, so the number
+                    // the plan is accountable to can be measured through the real app
+                    // rather than through a harness that skips playback.
+                    AppLog.write(String(format: "speak: first sound after %.3fs on the %@ engine",
+                                        elapsed, engineChoice.logName))
                     refresh()
                 }
                 do {
@@ -358,11 +516,14 @@ final class AppController {
             // Nothing at all came back. Distinguishing "the engine is gone" from "the
             // engine is there and answering badly" needs one cheap question, and the
             // answer changes what the user should do about it.
+            let runtime = self.runtime
+            let generation = engineGeneration
             Task { [weak self] in
-                guard let self else { return }
-                let reachable = await self.provider.identityProbe()
+                let reachable = await runtime.probeReachable()
+                guard let self, generation == self.engineGeneration else { return }
                 if !reachable {
-                    self.health.markUnreachable("nothing answering on 127.0.0.1:\(self.port)")
+                    self.health.markUnreachable(
+                        runtime.choice.unreachableReason(port: self.port))
                 } else {
                     self.health.markReachable()
                 }
@@ -394,7 +555,8 @@ final class AppController {
         // Fire-and-forget by design: `SpeechSession.speak` bumps the generation
         // synchronously, so stale work is discarded whether or not this has landed yet,
         // and awaiting it here would put an unwinding network call on the hotkey path.
-        Task { [session] in await session.cancelAll() }
+        let session = runtime.session
+        Task { await session.cancelAll() }
     }
 
     private func report(_ message: String) {
@@ -429,10 +591,18 @@ final class AppController {
         menuBar.setIcon(icon)
         menuBar.setStatusLine(line)
         menuBar.setEngineStatus(health.summary)
-        menuBar.setWarning(hotkeyWarning)
+        menuBar.setWarning(warningLine)
         menuBar.setTransport(canSpeak: true,
                              isPlaying: isPlaying,
                              isPaused: engine?.isPaused ?? false)
+    }
+
+    /// Every standing problem at once, or nil when there are none. Two separate
+    /// warnings must not hide each other — a broken hotkey and a broken engine are both
+    /// things the user needs to know, and whichever was set second would otherwise win.
+    private var warningLine: String? {
+        let problems = [hotkeyWarning, engineWarning].compactMap { $0 }
+        return problems.isEmpty ? nil : problems.joined(separator: " • ")
     }
 
     // MARK: - Turning failures into sentences

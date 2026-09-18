@@ -131,7 +131,10 @@ private let offered = MenuBarController.rates  // 0.75, 1.0, 1.25, 1.5, 2.0
 // MARK: - Helper
 
 /// Runs `body` against a `UserDefaults` suite that exists only for this test.
-private func withTemporaryDefaults(_ body: (UserDefaults) -> Void) {
+/// Internal rather than file-private: `EngineChoiceTests` stores an engine preference
+/// through the same round trip, and two copies of a throwaway-suite helper is how one of
+/// them ends up not cleaning up after itself.
+func withTemporaryDefaults(_ body: (UserDefaults) -> Void) {
     let name = "com.moxspeak.tests.\(UUID().uuidString)"
     guard let defaults = UserDefaults(suiteName: name) else {
         Issue.record("could not open a temporary UserDefaults suite")

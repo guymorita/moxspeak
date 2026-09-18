@@ -1,8 +1,8 @@
 import Foundation
 import MoxSpeakCore
 
-/// The two things the app remembers between launches: the chosen voice and the chosen
-/// speed.
+/// The three things the app remembers between launches: the chosen engine, the chosen
+/// voice and the chosen speed.
 ///
 /// Deliberately two halves. The *resolving* half is pure — it takes what was read off
 /// disk plus what is actually available right now, and returns something safe to use.
@@ -25,9 +25,14 @@ struct Settings {
     static let defaultVoice = "af_bella"
     static let defaultRate: Float = 1.0
 
+    /// What a machine that has never been configured gets: the engine that needs nothing
+    /// else installed.
+    static let defaultEngine = EngineChoice.default
+
     private enum Key {
         static let voice = "voice"
         static let rate = "rate"
+        static let engine = "engine"
     }
 
     /// `.standard` is the bundle identifier's own suite — `com.moxspeak.menubar` — which
@@ -69,6 +74,21 @@ struct Settings {
         }
     }
 
+    /// The engine exactly as it was written, or nil when nothing has ever been saved.
+    ///
+    /// A `String?` rather than an `EngineChoice?` for the same reason `storedVoice` is
+    /// not validated here: what is on disk is a rumour. It may have been written by a
+    /// future version that knows an engine this one does not, or hand-edited with
+    /// `defaults write`. Decoding is `resolveEngine`'s job, and its answer is always a
+    /// usable engine.
+    var storedEngine: String? {
+        get { defaults.string(forKey: Key.engine) }
+        nonmutating set {
+            if let newValue { defaults.set(newValue, forKey: Key.engine) }
+            else { defaults.removeObject(forKey: Key.engine) }
+        }
+    }
+
     // MARK: - Resolving (pure)
 
     /// Picks the voice to actually use, given what was stored and what the engine offers.
@@ -85,6 +105,25 @@ struct Settings {
         guard !available.isEmpty else { return candidate ?? defaultVoice }
         if let candidate, available.contains(candidate) { return candidate }
         if available.contains(defaultVoice) { return defaultVoice }
+        return available[0]
+    }
+
+    /// Picks the engine to actually use, given what was stored and what this build has.
+    ///
+    /// Unlike a voice, an unrecognised engine is not a temporary absence that might come
+    /// back — this build either has the code for it or it does not — so there is nothing
+    /// to preserve by hesitating, and the answer is the default. The `available`
+    /// parameter exists so a build that ever ships without one of them (or a test) is
+    /// answered honestly rather than handed an engine that is not there.
+    static func resolveEngine(stored: String?,
+                              available: [EngineChoice] = EngineChoice.allCases) -> EngineChoice {
+        guard !available.isEmpty else { return defaultEngine }
+
+        let wanted = stored?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let candidate = EngineChoice(rawValue: wanted), available.contains(candidate) {
+            return candidate
+        }
+        if available.contains(defaultEngine) { return defaultEngine }
         return available[0]
     }
 
