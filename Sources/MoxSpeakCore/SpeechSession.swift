@@ -21,6 +21,7 @@ public actor SpeechSession {
 
     private let provider: any SpeechProvider
     private let preparer: TextPreparer
+    private let normalizer: TextNormalizer
     private let segmenter: Segmenter
     private let estimator: DurationEstimator
     private let validation: ValidationPolicy
@@ -33,11 +34,13 @@ public actor SpeechSession {
 
     public init(provider: any SpeechProvider,
                 preparer: TextPreparer = TextPreparer(),
+                normalizer: TextNormalizer = TextNormalizer(),
                 segmenter: Segmenter = Segmenter(),
                 estimator: DurationEstimator = DurationEstimator(),
                 validation: ValidationPolicy = ValidationPolicy()) {
         self.provider = provider
         self.preparer = preparer
+        self.normalizer = normalizer
         self.segmenter = segmenter
         self.estimator = estimator
         self.validation = validation
@@ -59,7 +62,14 @@ public actor SpeechSession {
         currentGeneration += 1
         let generation = currentGeneration
 
-        let prepared = preparer.prepare(raw)
+        // Preparation always runs; normalization is the engine's call. The two are separate
+        // stages on purpose — see `TextNormalizer` — and normalization runs before
+        // segmentation so that expanding "Dec." cannot leave a period behind for the
+        // segmenter to mistake for the end of a sentence.
+        var prepared = preparer.prepare(raw)
+        if provider.requiresTextNormalization {
+            prepared = normalizer.normalize(prepared)
+        }
         chunks = segmenter.segment(prepared)
         states = [:]
         for chunk in chunks { states[chunk.id] = .pending }

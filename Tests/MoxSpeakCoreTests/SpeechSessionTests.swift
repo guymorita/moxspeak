@@ -125,6 +125,7 @@ private let article = String(
         nonisolated var outputFormat: AudioFormat { .kokoroPCM }
         nonisolated var supportsIncrementalStreaming: Bool { true }
         nonisolated var recommendedCharacterCap: Int { 150 }
+        nonisolated var requiresTextNormalization: Bool { false }
         private let estimator = DurationEstimator()
         private var callCount = 0
         func synthesize(text: String, voice: String, speed: Double) async throws -> Data {
@@ -196,6 +197,7 @@ private let article = String(
         nonisolated var outputFormat: AudioFormat { .kokoroPCM }
         nonisolated var supportsIncrementalStreaming: Bool { true }
         nonisolated var recommendedCharacterCap: Int { 150 }
+        nonisolated var requiresTextNormalization: Bool { false }
         private let estimator = DurationEstimator()
         private var inFlight = 0
         private(set) var maxInFlight = 0

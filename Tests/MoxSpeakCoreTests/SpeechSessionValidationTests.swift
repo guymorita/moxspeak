@@ -62,6 +62,7 @@ private func session(_ provider: some SpeechProvider) -> SpeechSession {
         nonisolated var outputFormat: AudioFormat { .kokoroPCM }
         nonisolated var supportsIncrementalStreaming: Bool { true }
         nonisolated var recommendedCharacterCap: Int { 150 }
+        nonisolated var requiresTextNormalization: Bool { false }
         private var seen = 0
         private let estimator = DurationEstimator()
 
@@ -190,6 +191,7 @@ private func session(_ provider: some SpeechProvider,
         nonisolated var outputFormat: AudioFormat { .kokoroPCM }
         nonisolated var supportsIncrementalStreaming: Bool { true }
         nonisolated var recommendedCharacterCap: Int { 150 }
+        nonisolated var requiresTextNormalization: Bool { false }
         private let estimator = DurationEstimator()
         private var nextMarker: UInt8 = 0
         /// Text of each successful call, in call order, with the byte value it was filled with.

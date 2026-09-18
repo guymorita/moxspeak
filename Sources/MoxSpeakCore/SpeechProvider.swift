@@ -22,6 +22,16 @@ public protocol SpeechProvider: Sendable {
     /// Largest input this engine handles reliably. An engine property, not a constant.
     var recommendedCharacterCap: Int { get }
 
+    /// True when this engine expects numbers, money, dates and abbreviations already spelled
+    /// out as words, and the session should run `TextNormalizer` before handing text over.
+    ///
+    /// There is no default. Getting this wrong is silently destructive in both directions: a
+    /// server that normalizes for itself (Kokoro-FastAPI) and is also normalized here reads
+    /// "$5" as "five dollars dollars", while an engine that normalizes nothing and is told so
+    /// wrongly reads "$1,234.56" as a string of unrelated digits. Neither failure throws, so
+    /// every provider is made to state its position rather than inherit a guess.
+    var requiresTextNormalization: Bool { get }
+
     /// Synthesize one chunk. Must honor `Task` cancellation.
     func synthesize(text: String, voice: String, speed: Double) async throws -> Data
 
@@ -47,6 +57,11 @@ public actor FakeProvider: SpeechProvider {
     public nonisolated var supportsIncrementalStreaming: Bool { true }
     public nonisolated var recommendedCharacterCap: Int { 150 }
 
+    /// Set at construction so a test can stand up both sides of the normalization decision.
+    /// A `let` rather than a settable property: the requirement is `nonisolated`, so a
+    /// mutable version would be readable from outside the actor mid-flight.
+    public nonisolated let requiresTextNormalization: Bool
+
     private var behavior: Behavior = .normal
     private let estimator = DurationEstimator()
     private var failingFirstRemaining = 0
@@ -61,7 +76,9 @@ public actor FakeProvider: SpeechProvider {
     /// every test.
     public private(set) var lastSpeed: Double?
 
-    public init() {}
+    public init(requiresTextNormalization: Bool = false) {
+        self.requiresTextNormalization = requiresTextNormalization
+    }
 
     public func setBehavior(_ behavior: Behavior) {
         self.behavior = behavior
