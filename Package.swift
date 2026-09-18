@@ -55,7 +55,18 @@ let package = Package(
 
         // The synthesis half of this suite skips itself when the weights are not on
         // disk, so a fresh checkout still runs it green.
-        .testTarget(name: "MoxSpeakNativeTests", dependencies: ["MoxSpeakNative"]),
+        //
+        // MLX is a direct dependency of the *tests* and deliberately not of the provider:
+        // the performance envelope suite constrains MLX's allocator and device to stand in
+        // for a weaker Mac, and that is a measurement affordance, not something the
+        // shipped engine should carry.
+        .testTarget(
+            name: "MoxSpeakNativeTests",
+            dependencies: [
+                "MoxSpeakNative",
+                .product(name: "MLX", package: "mlx-swift"),
+            ]
+        ),
 
         // MARK: - Vendored (Sources/Vendor)
 

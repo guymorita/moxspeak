@@ -41,6 +41,10 @@ enum NativeTestEnvironment {
     }()
 }
 
+// Nested inside `NativeEngineTests` so it does not run in parallel with the other suites
+// that drive the model — see the note on that type.
+extension NativeEngineTests {
+
 @MainActor
 @Suite(.enabled(if: NativeTestEnvironment.isReady))
 struct NativeSynthesisTests {
@@ -120,4 +124,6 @@ struct NativeSynthesisTests {
         // here — this only has to catch fp16 diverging structurally.
         #expect(half.count == full.count)
     }
+}
+
 }
