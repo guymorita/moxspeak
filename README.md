@@ -10,6 +10,8 @@ bundled with the app, so it works on a plane.
 [Website](https://guymorita.github.io/moxspeak/) ·
 [All releases](https://github.com/guymorita/moxspeak/releases)
 
+<img src="docs/screenshot.png" width="420" alt="MoxSpeak's welcome window: the menu bar icon, the shortcut, and the Select-to-Speak permission">
+
 ---
 
 ## Requirements
@@ -50,7 +52,8 @@ Without it MoxSpeak still works, but it reads whatever you last copied rather th
 you have selected.
 
 If your menu bar icon does not appear, check whether a menu bar manager such as Ice,
-Bartender or Hidden Bar has put it in a hidden section. New icons often land there.
+Bartender or Hidden Bar has put it in a hidden section. New icons land there by default in
+Ice, which is reproducible and not a MoxSpeak bug.
 
 ## Privacy
 
@@ -78,7 +81,18 @@ time on a MacBook Air and, to most ears, better than the premium voices macOS sh
 
 Time to first sound is about 0.3 seconds on an M2 Max.
 
+## Support
+
+This is a side project, given away. Issues are open and I read them, but nothing here is
+promised: no SLA, no roadmap, and possibly no second version. If it breaks for you and the
+fix is small, say so and it may well get fixed. If you need something dependable for work,
+this is not that.
+
 ## Building it
+
+Installing a local build over a copy that came from a download leaves the downloaded
+copy's quarantine flag on the directory, and quarantined plus unnotarized is exactly what
+Gatekeeper refuses. `build-app.sh` prints the install command that avoids it.
 
 ```bash
 git clone https://github.com/guymorita/moxspeak

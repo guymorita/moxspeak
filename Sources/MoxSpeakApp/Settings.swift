@@ -22,7 +22,11 @@ struct Settings {
 
     /// Matches `AppController`'s own starting voice. Kokoro ships it; if it is somehow
     /// missing, `resolveVoice` falls through to whatever the engine does offer.
-    static let defaultVoice = "af_bella"
+    /// Kokoro grades its own voices in VOICES.md, and af_heart is the only American
+    /// English voice graded A. af_bella is A-, and every male voice is C+ — which is why
+    /// the default is a considered choice rather than the alphabetical accident it was.
+    /// First impressions of a text-to-speech app are entirely the voice.
+    static let defaultVoice = "af_heart"
     static let defaultRate: Float = 1.0
 
     /// What a machine that has never been configured gets: the engine that needs nothing

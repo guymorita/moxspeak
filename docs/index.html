@@ -110,6 +110,33 @@
   }
 
 
+
+  /* ---- hear it ---- */
+  .samples { display: grid; gap: 12px; margin: 20px 0 0; }
+  .sample {
+    background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 12px; padding: 16px 18px;
+  }
+  .sample .kind {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--ink-faint); font-weight: 600; margin: 0 0 7px;
+  }
+  .sample .said { margin: 0 0 13px; font-size: 0.95rem; color: var(--ink-soft); }
+  .players { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+  .play {
+    display: inline-flex; align-items: center; gap: 7px;
+    font: inherit; font-size: 0.88rem; font-weight: 600;
+    padding: 8px 15px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--gem-deep); background: var(--gem); color: #fff;
+  }
+  .play.alt { background: transparent; color: var(--ink-soft); border-color: var(--edge);
+              font-weight: 500; }
+  .play:hover { filter: brightness(1.06); }
+  .play:focus-visible { outline: 2px solid var(--gem); outline-offset: 2px; }
+  .play .glyph { font-size: 0.7rem; line-height: 1; }
+  .play[data-state="playing"] .glyph::before { content: "\275A\275A"; letter-spacing: -1px; }
+  .play .glyph::before { content: "\25B6"; }
+
   /* ---- laurel + quotes ---- */
   .laurel {
     display: flex; align-items: center; justify-content: center; gap: 10px;
@@ -285,6 +312,47 @@
   <p class="about">On Kokoro, the open voice model MoxSpeak runs.</p>
 </header>
 
+
+<section id="hear">
+  <h2>Hear it</h2>
+  <p class="lead">The same passage, read by MoxSpeak and by the voice already on your Mac.</p>
+
+  <div class="samples">
+    <div class="sample">
+      <p class="kind">A web article</p>
+      <p class="said">Researchers have known for decades that the rate at which a glacier
+      sheds mass depends less on the air above it than on the water beneath it. What they
+      found under the ice last winter was not what anyone expected.</p>
+      <div class="players">
+        <button class="play" data-src="samples/article-moxspeak.m4a"><span class="glyph"></span>MoxSpeak</button>
+        <button class="play alt" data-src="samples/article-macos.m4a"><span class="glyph"></span>macOS voice</button>
+      </div>
+    </div>
+
+    <div class="sample">
+      <p class="kind">Technical writing</p>
+      <p class="said">The API returns a 429 when you exceed 60 requests per hour. Back off
+      exponentially, starting at 2 seconds, and read the X-RateLimit-Reset header rather
+      than guessing.</p>
+      <div class="players">
+        <button class="play" data-src="samples/technical-moxspeak.m4a"><span class="glyph"></span>MoxSpeak</button>
+        <button class="play alt" data-src="samples/technical-macos.m4a"><span class="glyph"></span>macOS voice</button>
+      </div>
+    </div>
+
+    <div class="sample">
+      <p class="kind">Fiction</p>
+      <p class="said">She had read the letter four times before she noticed the postmark.
+      It had been sent from a town she had not thought about in eleven years, by someone
+      who was supposed to be dead.</p>
+      <div class="players">
+        <button class="play" data-src="samples/fiction-moxspeak.m4a"><span class="glyph"></span>MoxSpeak</button>
+        <button class="play alt" data-src="samples/fiction-macos.m4a"><span class="glyph"></span>macOS voice</button>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section>
   <h2>What it is</h2>
   <p class="lead">
@@ -386,6 +454,36 @@
 </footer>
 
 </div>
+<script>
+  // One <audio> for the whole page. Six separate elements would each preload and would
+  // each need stopping when another started; one element that swaps its src cannot play
+  // two things at once by construction.
+  (function () {
+    var audio = new Audio();
+    var current = null;
+
+    function reset() {
+      if (current) { current.dataset.state = "idle"; current = null; }
+    }
+    audio.addEventListener("ended", reset);
+    audio.addEventListener("error", reset);
+
+    document.querySelectorAll(".play").forEach(function (button) {
+      button.addEventListener("click", function () {
+        if (current === button) { audio.pause(); reset(); return; }
+        reset();
+        audio.src = button.dataset.src;
+        audio.currentTime = 0;
+        // play() rejects when a browser blocks autoplay or the file is missing; without
+        // this the button would sit on "playing" forever having played nothing.
+        audio.play().then(function () {
+          current = button;
+          button.dataset.state = "playing";
+        }).catch(reset);
+      });
+    });
+  })();
+</script>
 <script>
   // The app's Advanced menu links straight to #privacy. A <details> cannot be opened by
   // CSS, so open it here and bring it into view; without this the link lands on a

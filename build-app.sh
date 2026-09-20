@@ -338,6 +338,13 @@ printf "    zipped      %s MiB (%s MB)\n" "$((ZIP_BYTES / 1048576))" "$((ZIP_BYT
 
 echo
 echo "Built: $(cd "${BUILD_DIR}" && pwd)/${APP_NAME}.app"
+# Installing a local build over a copy that came from a download leaves the downloaded
+# copy's com.apple.quarantine attribute sitting on the directory. Quarantined plus
+# unnotarized is precisely what Gatekeeper refuses, so the next launch says "Apple cannot
+# check it for malicious software" about a build that never left the machine. Costs an
+# afternoon to diagnose and looks exactly like a broken release.
+echo "Install: pkill -x ${APP_NAME}; ditto ${APP} /Applications/${APP_NAME}.app \\"
+echo "         && xattr -d -r com.apple.quarantine /Applications/${APP_NAME}.app 2>/dev/null; true"
 echo "Run it:  open -a \"$(cd "${BUILD_DIR}" && pwd)/${APP_NAME}.app\""
 echo "Check:   MOXSPEAK_SELFTEST=1 \"$(cd "${BUILD_DIR}" && pwd)/${APP_NAME}.app/Contents/MacOS/${APP_NAME}\""
 echo "         (loads and speaks using only what is inside the bundle, then exits)"

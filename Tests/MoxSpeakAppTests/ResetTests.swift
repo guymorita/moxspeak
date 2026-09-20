@@ -115,7 +115,10 @@ import Foundation
 
         Reset.erasePreferences(in: defaults, domain: settings.domain)
 
-        let voices = ["af_bella", "am_michael", "bf_emma"]
+        // Includes the default, as every real install does: all 29 voices ship in the
+        // bundle. A fixture without it tests the missing-voice fallback instead of the
+        // thing this test is named for.
+        let voices = [Settings.defaultVoice, "af_bella", "am_michael", "bf_emma"]
         #expect(Settings.resolveVoice(stored: settings.storedVoice, available: voices)
                 == Settings.defaultVoice)
         #expect(Settings.resolveRate(stored: settings.storedRate) == Settings.defaultRate)
