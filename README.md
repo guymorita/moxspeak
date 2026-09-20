@@ -6,8 +6,9 @@ good voice.
 No server to start, no account, no network. The voice model runs on your machine and is
 bundled with the app, so it works on a plane.
 
-**[Download for macOS](https://github.com/guymorita/moxspeak/releases/latest)** ·
-[moxspeak website](https://guymorita.github.io/moxspeak/)
+**[Download MoxSpeak.dmg](https://github.com/guymorita/moxspeak/releases/latest/download/MoxSpeak.dmg)** (170 MB) ·
+[Website](https://guymorita.github.io/moxspeak/) ·
+[All releases](https://github.com/guymorita/moxspeak/releases)
 
 ---
 
@@ -21,9 +22,7 @@ bundled with the app, so it works on a plane.
 
 ## Install
 
-Download the DMG from
-[Releases](https://github.com/guymorita/moxspeak/releases/latest), open it, and drag
-MoxSpeak to Applications.
+[Download MoxSpeak.dmg](https://github.com/guymorita/moxspeak/releases/latest/download/MoxSpeak.dmg), open it, and drag MoxSpeak to Applications.
 
 Or, if you would rather:
 
