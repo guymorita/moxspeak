@@ -110,6 +110,16 @@ final class AppController {
             enableSelectToSpeak: { [weak self] in self?.enableSelectToSpeak() },
             openShortcuts: { [weak self] in self?.openShortcuts() },
             reset: { [weak self] in self?.resetEverything() },
+            isTelemetryEnabled: { [weak self] in self?.settings.isTelemetryEnabled ?? true },
+            setTelemetryEnabled: { [weak self] on in
+                guard let self else { return }
+                Telemetry.setEnabled(on, settings: self.settings)
+            },
+            openPrivacy: {
+                if let url = URL(string: "https://guymorita.github.io/moxspeak/#privacy") {
+                    NSWorkspace.shared.open(url)
+                }
+            },
             menuWillOpen: { [weak self] in self?.refreshSelectToSpeak() },
             quit: { NSApplication.shared.terminate(nil) }
         ))
@@ -124,6 +134,14 @@ final class AppController {
         nowPlaying.onTogglePlayPause = { [weak self] in self?.togglePause() }
         nowPlaying.onStop = { [weak self] in self?.stop() }
         nowPlaying.activate()
+
+        Telemetry.start(settings: settings)
+        Telemetry.record(.appLaunched, [
+            "engine": engineChoice.rawValue,
+            "accessibility": SelectionReader.isTrusted,
+            "voice": voice,
+            "speed": Double(rate),
+        ])
 
         refresh()
         // Deferred a turn: AppKit has not placed the status item in the menu bar yet at
@@ -153,8 +171,10 @@ final class AppController {
         // puts it in front — and returns to accessory afterwards, because a Dock icon is
         // exactly what this app promises not to have.
         NSApp.setActivationPolicy(.regular)
+        let speakHotkey = hotkeyBindings[.speak] ?? HotkeyAction.speak.defaultHotkey
         let controller = WelcomeWindowController(
-            shortcutLabel: hotkeyBindings[.speak]?.label ?? HotkeyAction.speak.defaultHotkey.label,
+            shortcutLabel: speakHotkey.label,
+            shortcutWords: speakHotkey.spelledOut,
             actions: .init(
                 requestAccessibility: {
                     SelectionReader.requestPermission()
@@ -171,6 +191,7 @@ final class AppController {
 
     private func finishFirstRun(launchAtLogin: Bool) {
         settings.hasCompletedFirstRun = true
+        Telemetry.record(.firstRunCompleted, ["accessibility": SelectionReader.isTrusted])
         NSApp.setActivationPolicy(.accessory)
         if LaunchAtLogin.isAvailable {
             let settled = LaunchAtLogin.set(launchAtLogin)

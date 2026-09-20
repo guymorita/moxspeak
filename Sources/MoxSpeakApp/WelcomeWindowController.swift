@@ -47,6 +47,7 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
 
     private let actions: Actions
     private let shortcutLabel: String
+    private let shortcutWords: String
     private var window: NSWindow?
     private var accessibilityButton: NSButton?
     private var accessibilityNote: NSTextField?
@@ -56,8 +57,9 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
     /// strict concurrency, and the controller outlives the window anyway.
     private var pollTimer: Timer?
 
-    init(shortcutLabel: String, actions: Actions) {
+    init(shortcutLabel: String, shortcutWords: String, actions: Actions) {
         self.shortcutLabel = shortcutLabel
+        self.shortcutWords = shortcutWords
         self.actions = actions
         super.init()
     }
@@ -120,6 +122,13 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
         let key = label(shortcutLabel, font: .systemFont(ofSize: 26, weight: .medium))
         key.alignment = .center
 
+        // The glyphs and the words, together. ⌃ and ⌥ are used by far more people than
+        // can name them — ⌃ is regularly read as ⌘ or as a stray mark — and somebody who
+        // cannot decode the symbols cannot use the app at all. Showing both costs one
+        // line and removes the only step here that can silently fail.
+        let keyWords = label(shortcutWords, font: .systemFont(ofSize: 12), secondary: true)
+        keyWords.alignment = .center
+
         let button = NSButton(title: "Turn on Select-to-Speak", target: self,
                               action: #selector(enableAccessibility))
         button.bezelStyle = .rounded
@@ -152,7 +161,7 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
 
         let stack = NSStackView(views: [
             icon, title, whereItIs,
-            separator(), howTo, key, separator(),
+            separator(), howTo, key, keyWords, separator(),
             button, note, login, start, privacy,
         ])
         stack.orientation = .vertical
@@ -161,6 +170,8 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
         stack.setCustomSpacing(4, after: icon)
         stack.setCustomSpacing(14, after: whereItIs)
         stack.setCustomSpacing(2, after: howTo)
+        stack.setCustomSpacing(1, after: key)
+        stack.setCustomSpacing(16, after: keyWords)
         stack.setCustomSpacing(6, after: button)
         stack.setCustomSpacing(18, after: note)
         stack.setCustomSpacing(18, after: login)

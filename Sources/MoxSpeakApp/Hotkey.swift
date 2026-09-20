@@ -152,6 +152,26 @@ struct Hotkey: Equatable, Hashable, Sendable {
         Hotkey.modifierLabel(for: modifiers) + Hotkey.keyName(for: keyCode)
     }
 
+    /// "Control + Option + S" — the same shortcut, spelled out.
+    ///
+    /// ⌃ and ⌥ in particular are read by far fewer people than the people who use them.
+    /// ⌘ is widely recognised, ⇧ is guessable, and ⌃ is routinely mistaken for ⌘ or for a
+    /// typo. A welcome window that only shows glyphs is asking somebody to identify two
+    /// symbols they may never have consciously seen before they can use the app at all,
+    /// so the welcome window shows both and this is the half that can be read aloud.
+    ///
+    /// Apple's own names for the keys, in Apple's order, so it matches what System
+    /// Settings calls them.
+    var spelledOut: String {
+        var parts: [String] = []
+        if modifiers & Hotkey.control != 0 { parts.append("Control") }
+        if modifiers & Hotkey.option != 0 { parts.append("Option") }
+        if modifiers & Hotkey.shift != 0 { parts.append("Shift") }
+        if modifiers & Hotkey.command != 0 { parts.append("Command") }
+        parts.append(Hotkey.keyName(for: keyCode))
+        return parts.joined(separator: " + ")
+    }
+
     /// The modifier symbols alone, in the same order. The shortcut recorder shows this
     /// while keys are being held and no key has been pressed yet.
     static func modifierLabel(for modifiers: UInt32) -> String {

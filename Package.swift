@@ -25,6 +25,18 @@ let package = Package(
         // and by the vendored KokoroSwift acoustic model. Pinned exactly: MLX's Swift API
         // moves, and the metallib we ship has to match the version we compile against.
         .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.30.2"),
+
+        // The project's deliberate second dependency, and the only one in the app layer.
+        // MoxSpeak is shipped to people who will not report bugs — crashes have to arrive
+        // on their own or they are never fixed. `upToNextMajor` rather than `exact`: this
+        // one is not load-bearing for correctness, nothing we ship has to match its build
+        // the way the metallib matches MLX's, and a patch release that fixes a crash
+        // reporter should be easy to take.
+        //
+        // How it is configured — and what it is forbidden from sending — is in
+        // Sources/MoxSpeakApp/Telemetry.swift, which is where to look before trusting any
+        // claim on the website about what leaves the machine.
+        .package(url: "https://github.com/getsentry/sentry-cocoa", .upToNextMajor(from: "9.29.0")),
     ],
     targets: [
         // MARK: - Ours
@@ -41,7 +53,12 @@ let package = Package(
         // hatch if the native path ever regresses. Linking (Phase 5) and switching
         // (Phase 6) were deliberately separate steps so a packaging problem and a
         // behaviour change could not be confused for each other.
-        .executableTarget(name: "MoxSpeakApp", dependencies: ["MoxSpeakCore", "MoxSpeakNative"]),
+        .executableTarget(
+            name: "MoxSpeakApp",
+            dependencies: [
+                "MoxSpeakCore", "MoxSpeakNative",
+                .product(name: "Sentry", package: "sentry-cocoa"),
+            ]),
 
         // Text -> 24 kHz mono 16-bit PCM, entirely in-process. Depends on Core; Core
         // does not depend on it.
