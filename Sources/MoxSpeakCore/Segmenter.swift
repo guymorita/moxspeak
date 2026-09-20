@@ -481,10 +481,21 @@ public struct Segmenter: Sendable {
                                      // is true), so extending sourceEnd by one keeps this
                                      // chunk's [sourceStart, sourceEnd) matching its text.
                                      sourceEnd: chunks[last].sourceEnd + 1,
-                                     sentenceOffsets: chunks[last].sentenceOffsets)
+                                     sentenceOffsets: chunks[last].sentenceOffsets,
+                                     endsParagraph: chunks[last].endsParagraph)
                 startNewChunk(with: unit)
             } else {
                 startNewChunk(with: unit)
+            }
+
+            // Same rule as the fits-branch above, and it has to be repeated here because
+            // this path starts a fresh chunk rather than appending to one. Without it a
+            // paragraph is only marked when its last sentence happened to fit alongside
+            // what came before — which, in any document long enough to fill a chunk, is
+            // almost never.
+            if unit.endsParagraph {
+                currentEndsParagraph = true
+                emit()
             }
         }
         emit()

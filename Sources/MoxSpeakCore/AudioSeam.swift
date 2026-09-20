@@ -55,7 +55,11 @@ public struct AudioSeam: Sendable {
         /// engine produced internally. `clause` is a comma's worth. `word` is zero:
         /// the segmenter only splits between words when a clause overran the character
         /// cap, and there is no pause there in speech.
-        public var sentenceGap: TimeInterval = 0.35
+        /// 0.39 rather than a round number: measured across a corpus, Kokoro's own
+        /// pause between two sentences inside one utterance runs 107 to 548 ms with a
+        /// median of 392. Matching the median means a seam at a sentence boundary is
+        /// indistinguishable from one the engine produced itself.
+        public var sentenceGap: TimeInterval = 0.39
 
         /// A paragraph break. Measurably longer than a sentence, because it was
         /// indistinguishable from one and that is what got reported: reading an essay,

@@ -66,6 +66,7 @@ public struct TextPreparer: Sendable {
         }
         text = stripObjectPlaceholders(text)
         text = normalizePunctuation(text)
+        text = restoreMissingSentenceSpaces(text)
 
         return collapseWhitespace(text)
     }
@@ -126,6 +127,7 @@ public struct TextPreparer: Sendable {
     private func collapseNewlines(_ text: String) -> String {
         var result = ""
         var sawBlankLine = false
+        var previousLine = ""
 
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
             let content = line.trimmingCharacters(in: .whitespaces)
@@ -151,16 +153,48 @@ public struct TextPreparer: Sendable {
                 // Without it a new paragraph is acoustically identical to the next
                 // sentence, which is exactly how it sounded.
                 var separator = Self.separator(after: result, breaking: !continuesSentence)
-                if sawBlankLine {
+                if Self.isParagraphBreak(blankLine: sawBlankLine, previousLine: previousLine) {
                     separator = String(separator.dropLast()) + "\n"
                 }
                 result += separator
                 result += content
             }
             sawBlankLine = false
+            previousLine = content
         }
         return result
     }
+
+    /// Whether the break before a line separates two paragraphs rather than two sentences.
+    ///
+    /// A blank line always does; nothing wraps across one. The awkward case is a single
+    /// newline, and it matters because that is usually what a browser puts on the
+    /// clipboard between two paragraphs. Requiring a blank line meant the paragraph pause
+    /// never appeared for the source people actually read from, which is how a fix that
+    /// measured correctly in a test still sounded broken in the app.
+    ///
+    /// Two conditions, both needed:
+    ///
+    /// - **The previous line finished a sentence.** A line ending mid-sentence is a soft
+    ///   wrap, and pausing there would wreck PDFs and email.
+    /// - **It was long.** This is what separates a paragraph from a list item or a
+    ///   navigation link, which also sit alone on a line and, after `stripMarkdown`
+    ///   terminates them, also end in a full stop.
+    ///
+    /// The cost is that a very short paragraph gets a sentence pause, and prose written
+    /// one sentence per line gets paragraph pauses between sentences. Both are mild, and
+    /// both are rarer than the case this exists for.
+    private static func isParagraphBreak(blankLine: Bool, previousLine: String) -> Bool {
+        if blankLine { return true }
+        let trimmed = previousLine.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= paragraphLineLength, let last = trimmed.last else { return false }
+        return ".!?\u{2026}".contains(last)
+    }
+
+    /// How long a line must be before a single newline after it reads as a paragraph
+    /// break rather than a list item. List items and nav links run to a handful of words;
+    /// a paragraph of prose runs to several lines' worth.
+    private static let paragraphLineLength = 60
 
     /// What goes between two lines: a space when the first was soft-wrapped, and the
     /// full stop that makes it a sentence of its own when the break was real and the line
@@ -240,6 +274,27 @@ public struct TextPreparer: Sendable {
     /// two start disagreeing about what the engine is allowed to see.
     private func stripObjectPlaceholders(_ text: String) -> String {
         text.replacing("\u{FFFC}", with: "")
+    }
+
+    /// Puts back the space between two sentences when there is none.
+    ///
+    /// Reported as an essay that "just kept reading as if there was no period". The
+    /// paragraphs had arrived joined with nothing at all between them — "the kitchen.I
+    /// knock on the door" — which is what reading a web page through the Accessibility
+    /// API can produce when the text of adjacent blocks is concatenated without a
+    /// separator. With no space there is no sentence boundary for the segmenter to find
+    /// and none for Kokoro to hear, so it reads straight through, and no amount of
+    /// tuning the pause between chunks helps because there is only one chunk.
+    ///
+    /// Narrow on purpose: a lower-case letter, then a terminator, then a capital. That is
+    /// the end of a word running into the start of a sentence, and almost nothing else
+    /// looks like it. Requiring the lower-case letter is what keeps "U.S.A" and "J.R.R."
+    /// intact, since those have a capital on the left. Decimals are untouched because a
+    /// digit is not a lower-case letter and a digit is not a capital.
+    private func restoreMissingSentenceSpaces(_ text: String) -> String {
+        text.replacing(/([a-z])([.!?])([A-Z])/) { match in
+            "\(match.1)\(match.2) \(match.3)"
+        }
     }
 
     private func normalizePunctuation(_ text: String) -> String {
