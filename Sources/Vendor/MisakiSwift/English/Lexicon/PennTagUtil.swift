@@ -2,7 +2,7 @@ import NaturalLanguage
 
 /// Maps Apple's NLTag (lexicalClass) to a Penn Treebank POS tag string.
 /// `token` is optional but might enable some heuristics.
-func pennTag(for nlTag: NLTag, token: String? = nil) -> String {
+func pennTag(for nlTag: NLTag, token: String? = nil, previousWord: String? = nil) -> String {
     let t = token?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let lower = t.lowercased()
 
@@ -65,6 +65,22 @@ func pennTag(for nlTag: NLTag, token: String? = nil) -> String {
         if auxDo.contains(lower) { return ["does"].contains(lower) ? "VBZ" : (lower == "did" ? "VBD" : "VB") }
         if auxHave.contains(lower) { return ["has"].contains(lower) ? "VBZ" : (lower == "had" ? "VBD" : "VB") }
         if lower.hasSuffix("ing") { return "VBG" }
+
+        // A verb after a form of "have" is a past participle. (MoxSpeak addition.)
+        //
+        // Morphology alone cannot see this: "read", "used" and "wound" spell every form
+        // the same way, so the suffix rules below fall through to VB and the lexicon's
+        // VBN entry is never reached. "She had read the letter" then comes out /ɹid/,
+        // which is the tense of the sentence contradicted out loud.
+        //
+        // Only "have" is handled, not "be". "Be" plus a verb is ambiguous between the
+        // passive ("it was read") and the progressive, and a wrong guess there would
+        // break words this currently gets right.
+        if let previous = previousWord?.lowercased(),
+           ["have", "has", "had", "having", "'ve", "'d", "ve", "d"].contains(previous) {
+            return "VBN"
+        }
+
         if lower.hasSuffix("ed")  { return "VBD" }
         if lower.hasSuffix("en")  { return "VBN" }
         if lower.hasSuffix("s")   { return "VBZ" }

@@ -57,7 +57,25 @@ we need MLX for inference regardless.
    "Resources inside a signed `.app`" below for why; `Bundle.module` remains the fallback,
    so nothing changes for `swift test`.
 
-Nothing else was changed. The G2P behaviour is upstream's, bugs included.
+5. **Heteronyms resolved from the preceding word** (MoxSpeak, 2026-09-20). Three small
+   edits, in `DataStructures/TokenContext.swift`, `Lexicon/PennTagUtil.swift` and
+   `Lexicon/Lexicon.swift`, plus one line in `EnglishG2P.swift`.
+
+   The lexicon keys four words by Penn tag — `read`, `reread`, `used`, `wound` — but
+   `lookup` only ever computed a coarse parent tag (VERB, NOUN, ADJ), so the VBD/VBN/VBP
+   entries were unreachable and every one fell through to DEFAULT. "She had read the
+   letter" came out /ɹid/, present tense, in a plainly past sentence.
+
+   `lookup` now tries the Penn tag before the parent tag, and `pennTag` returns VBN for a
+   verb preceded by a form of "have". That needed the previous word, which the G2P was not
+   passing down at all: the walk is backwards, so `TokenContext` carried only lookahead.
+   It now carries `previousWord` as well, set by the loop that has both neighbours.
+
+   Only "have" is handled, not "be": "be" plus a verb is ambiguous between the passive and
+   the progressive, and guessing there would break words this gets right today.
+   `HeteronymTests` covers both directions, including the nouns that must not move.
+
+Nothing else was changed. The G2P behaviour is otherwise upstream's, bugs included.
 
 ---
 

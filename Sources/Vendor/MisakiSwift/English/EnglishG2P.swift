@@ -410,6 +410,10 @@ final public class EnglishG2P {
     var ctx = TokenContext()
     for i in stride(from: words.count - 1, through: 0, by: -1) {
       if let w = words[i] as? MToken {
+        // The word before this one, for heteronyms. (MoxSpeak addition.) The walk is
+        // backwards, so everything else in ctx is lookahead; this is the other direction
+        // and has to be supplied here, where both neighbours are in hand.
+        ctx.previousWord = i > 0 ? (words[i - 1] as? MToken)?.text : nil
         if w.phonemes == nil {
           let out = lexicon.transcribe(w, ctx: ctx)
           w.phonemes = out.0

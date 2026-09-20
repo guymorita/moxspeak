@@ -270,6 +270,18 @@ final class Lexicon {
       if let ctx = ctx, ctx.futureVowel == nil, phonemeDict["None"] != nil {
         t = "XX"
       }
+      // Penn tag first, then the coarse parent tag. (MoxSpeak addition.)
+      //
+      // The lexicon keys heteronyms by Penn tag — "read" carries VBD, VBN and VBP
+      // entries — but `getParentTag` only ever yields VERB, NOUN, ADV, ADJ or XX, so
+      // those entries were unreachable and every one of them fell through to DEFAULT.
+      // Four words are affected: read, reread, used and wound.
+      if let tag = tag {
+        let penn = pennTag(for: tag, token: w, previousWord: ctx?.previousWord)
+        if let specific = phonemeDict[penn] ?? nil {
+          return (Lexicon.applyStress(specific, stress: stress), rating)
+        }
+      }
       phoneticString = phonemeDict[t ?? "DEFAULT"] ?? phonemeDict["DEFAULT"] ?? nil
     }
     

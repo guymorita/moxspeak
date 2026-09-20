@@ -105,12 +105,11 @@ Recorded with their measurements in `docs/superpowers/plans/2026-09-18-native-en
 
 ## Known open items
 
-- URL and email normalization is unimplemented in `TextNormalizer` — the worst remaining
-  phonemizer gap, and web articles are a primary use case.
+- Heteronyms beyond the "have" case are unresolved. `pennTag` now returns VBN after a
+  form of "have", which fixes "had read", but "I read it yesterday" still needs tense
+  from elsewhere in the sentence and comes out present. See `HeteronymTests`.
 - `12:00am` / `12:00pm` read literally rather than as midnight and noon.
 - Safari's 400 ms pasteboard timeout is inherited from prior art and never fires, since
   Safari reaches tier 1 in every content shape tested. Dead code; remove it.
-- macOS 26 is untested on hardware. Notarization blocks it. The specific unknown is whether
-  Carbon `RegisterEventHotKey` still works there — it is the only no-permission global
-  hotkey API, and the fallback (`CGEventTap`) costs the no-permission property that makes
-  this app cheap to install.
+- macOS 26: tested on hardware 2026-09-20. Carbon `RegisterEventHotKey` works, and the
+  app reported to Sentry from it. This is closed.

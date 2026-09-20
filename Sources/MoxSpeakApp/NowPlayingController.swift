@@ -75,16 +75,32 @@ final class NowPlayingController {
             return .success
         }
 
-        // Track skipping is still nothing: there is one article, not a playlist, and a
-        // control that does nothing reads as a broken app rather than a small one.
-        for unsupported in [commandCenter.nextTrackCommand,
-                            commandCenter.previousTrackCommand,
-                            commandCenter.seekForwardCommand,
+        // The ⏪ and ⏩ keys on a Mac keyboard send previousTrack and nextTrack — not
+        // skipBackward and skipForward, which only ever surface as buttons in Control
+        // Center and on the lock screen. Leaving the track commands disabled, as this
+        // did at first, means the two keys a listener reaches for do nothing at all.
+        //
+        // There is no next track here, and there never will be: MoxSpeak reads one thing
+        // at a time. So the pair is pointed at the same fifteen seconds the buttons move
+        // by, which is what a listener means by those keys on something that is not a
+        // playlist.
+        enable(commandCenter.previousTrackCommand) { [weak self] in
+            self?.onSkip?(-Self.skipSeconds)
+        }
+        enable(commandCenter.nextTrackCommand) { [weak self] in
+            self?.onSkip?(Self.skipSeconds)
+        }
+
+        // These two are a different gesture: press-and-hold scanning, which needs begin
+        // and end events this does not implement. A control that half works is worse
+        // than one that is plainly absent.
+        for unsupported in [commandCenter.seekForwardCommand,
                             commandCenter.seekBackwardCommand] {
             unsupported.isEnabled = false
         }
         AppLog.write("now playing: remote commands installed "
-                     + "(play/pause, stop, scrub, ±\(Int(Self.skipSeconds))s)")
+                     + "(play/pause, stop, scrub, ±\(Int(Self.skipSeconds))s on the "
+                     + "skip buttons and the ⏪ ⏩ keys)")
     }
 
     /// Announces a new utterance. The title is a short prefix of the text being read, so
