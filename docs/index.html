@@ -112,30 +112,43 @@
 
 
   /* ---- hear it ---- */
-  .samples { display: grid; gap: 12px; margin: 20px 0 0; }
+  .samples { display: grid; gap: 8px; margin: 16px 0 0; }
   .sample {
-    background: var(--panel); border: 1px solid var(--edge);
-    border-radius: 12px; padding: 16px 18px;
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 11px;
+    padding: 11px 14px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
   }
+  /* The passage used to be printed in full under each row. Nobody needs to read a
+     sample, and three paragraphs of it turned the one section that sells the product
+     into six hundred pixels nobody scrolls past. */
   .sample .kind {
-    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em;
-    color: var(--ink-faint); font-weight: 600; margin: 0 0 7px;
+    font-size: 0.82rem; font-weight: 600; color: var(--ink);
+    margin: 0; flex: 1 1 9rem; min-width: 9rem;
   }
-  .sample .said { margin: 0 0 13px; font-size: 0.95rem; color: var(--ink-soft); }
-  .players { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+  .players { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .play {
-    display: inline-flex; align-items: center; gap: 7px;
-    font: inherit; font-size: 0.88rem; font-weight: 600;
-    padding: 8px 15px; border-radius: 999px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    font: inherit; font-size: 0.83rem; font-weight: 600;
+    padding: 6px 13px; border-radius: 999px; cursor: pointer;
     border: 1px solid var(--gem-deep); background: var(--gem); color: #fff;
   }
   .play.alt { background: transparent; color: var(--ink-soft); border-color: var(--edge);
               font-weight: 500; }
   .play:hover { filter: brightness(1.06); }
   .play:focus-visible { outline: 2px solid var(--gem); outline-offset: 2px; }
-  .play .glyph { font-size: 0.7rem; line-height: 1; }
+  .play .glyph { font-size: 0.65rem; line-height: 1; }
   .play[data-state="playing"] .glyph::before { content: "\275A\275A"; letter-spacing: -1px; }
   .play .glyph::before { content: "\25B6"; }
+
+  /* A second chance to download, for somebody convinced by what they just heard. */
+  .again { text-align: center; margin: 22px 0 0; }
+  .again a {
+    display: inline-block; background: var(--gem); color: #fff; font-weight: 600;
+    padding: 11px 26px; border-radius: 10px; border: 1px solid var(--gem-deep);
+  }
+  .again a:hover { text-decoration: none; filter: brightness(1.07); }
+
+  .menubar-note { font-size: 0.78rem; color: var(--ink-faint); margin: 8px 0 0; }
 
   /* ---- laurel + quotes ---- */
   .laurel {
@@ -271,14 +284,15 @@
     <a class="download" href="https://github.com/guymorita/moxspeak/releases/latest/download/MoxSpeak.dmg">Download for macOS</a>
     <p class="reqs">Free · 170 MB · Apple silicon · macOS 14 or later</p>
     <p class="brew">or <code>brew install --cask guymorita/tap/moxspeak</code></p>
+    <p class="menubar-note">After installing, MoxSpeak lives in your menu bar. It has no window.</p>
   </div>
 
 
   <div class="laurel">
     <svg viewBox="0 0 44 62" aria-hidden="true"><path d="M31 57 C24 46 18 32 15 18 C14 12 13 8 13 4" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><ellipse cx="32.4" cy="52.1" rx="8.4" ry="3.5" transform="rotate(-58 32.4 52.1)"/><ellipse cx="30.8" cy="44.3" rx="7.7" ry="3.2" transform="rotate(-52 30.8 44.3)"/><ellipse cx="28.3" cy="36.5" rx="7.0" ry="3.0" transform="rotate(-47 28.3 36.5)"/><ellipse cx="25.5" cy="28.7" rx="6.3" ry="2.8" transform="rotate(-41 25.5 28.7)"/><ellipse cx="22.3" cy="20.9" rx="5.6" ry="2.5" transform="rotate(-35 22.3 20.9)"/><ellipse cx="18.8" cy="13.0" rx="4.9" ry="2.2" transform="rotate(-30 18.8 13.0)"/><ellipse cx="15.1" cy="5.1" rx="4.2" ry="2.0" transform="rotate(-24 15.1 5.1)"/></svg>
     <div class="claim">
-      <b>#1 on TTS Arena</b>
-      <span>Kokoro, the voice model inside MoxSpeak &middot; 2025</span>
+      <b>Powered by Kokoro</b>
+      <span>#1 on TTS Arena &middot; 2025</span>
     </div>
     <svg class="flip" viewBox="0 0 44 62" aria-hidden="true"><path d="M31 57 C24 46 18 32 15 18 C14 12 13 8 13 4" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><ellipse cx="32.4" cy="52.1" rx="8.4" ry="3.5" transform="rotate(-58 32.4 52.1)"/><ellipse cx="30.8" cy="44.3" rx="7.7" ry="3.2" transform="rotate(-52 30.8 44.3)"/><ellipse cx="28.3" cy="36.5" rx="7.0" ry="3.0" transform="rotate(-47 28.3 36.5)"/><ellipse cx="25.5" cy="28.7" rx="6.3" ry="2.8" transform="rotate(-41 25.5 28.7)"/><ellipse cx="22.3" cy="20.9" rx="5.6" ry="2.5" transform="rotate(-35 22.3 20.9)"/><ellipse cx="18.8" cy="13.0" rx="4.9" ry="2.2" transform="rotate(-30 18.8 13.0)"/><ellipse cx="15.1" cy="5.1" rx="4.2" ry="2.0" transform="rotate(-24 15.1 5.1)"/></svg>
   </div>
@@ -291,26 +305,8 @@
     <p class="said">Control + Option + S</p>
   </div>
 
-  <div class="quotes">
-    <div class="quote">
-      <q>The voices are better than the cloud provider IMO.</q>
-      <span class="who">jonmagic, switching from ElevenLabs &middot;
-        <a href="https://news.ycombinator.com/item?id=48832850">Hacker News</a></span>
-    </div>
-    <div class="quote">
-      <q>The most natural sounding and small too.</q>
-      <span class="who">zackify &middot;
-        <a href="https://news.ycombinator.com/item?id=48824474">Hacker News</a></span>
-    </div>
-    <div class="quote">
-      <q>I use it to read ebooks that don't have audiobooks and it works pretty good
-      for that.</q>
-      <span class="who">lucumo &middot;
-        <a href="https://news.ycombinator.com/item?id=48829204">Hacker News</a></span>
-    </div>
-  </div>
-  <p class="about">On Kokoro, the open voice model MoxSpeak runs.</p>
 </header>
+
 
 
 <section id="hear">
@@ -320,37 +316,28 @@
   <div class="samples">
     <div class="sample">
       <p class="kind">A web article</p>
-      <p class="said">Researchers have known for decades that the rate at which a glacier
-      sheds mass depends less on the air above it than on the water beneath it. What they
-      found under the ice last winter was not what anyone expected.</p>
       <div class="players">
         <button class="play" data-src="samples/article-moxspeak.m4a"><span class="glyph"></span>MoxSpeak</button>
         <button class="play alt" data-src="samples/article-macos.m4a"><span class="glyph"></span>macOS voice</button>
       </div>
     </div>
-
     <div class="sample">
       <p class="kind">Technical writing</p>
-      <p class="said">The API returns a 429 when you exceed 60 requests per hour. Back off
-      exponentially, starting at 2 seconds, and read the X-RateLimit-Reset header rather
-      than guessing.</p>
       <div class="players">
         <button class="play" data-src="samples/technical-moxspeak.m4a"><span class="glyph"></span>MoxSpeak</button>
         <button class="play alt" data-src="samples/technical-macos.m4a"><span class="glyph"></span>macOS voice</button>
       </div>
     </div>
-
     <div class="sample">
       <p class="kind">Fiction</p>
-      <p class="said">The lighthouse keeper's daughter kept a list of every ship that
-      passed. On the morning of the storm she counted nine going out and only eight
-      coming back, and she never told anyone which one was missing.</p>
       <div class="players">
         <button class="play" data-src="samples/fiction-moxspeak.m4a"><span class="glyph"></span>MoxSpeak</button>
         <button class="play alt" data-src="samples/fiction-macos.m4a"><span class="glyph"></span>macOS voice</button>
       </div>
     </div>
   </div>
+
+  <p class="again"><a href="https://github.com/guymorita/moxspeak/releases/latest/download/MoxSpeak.dmg">Download for macOS</a></p>
 </section>
 
 <section>
@@ -387,6 +374,29 @@
 </section>
 
 <section>
+  <h2>What people say about the voice</h2>
+  <div class="quotes">
+    <div class="quote">
+      <q>The voices are better than the cloud provider IMO.</q>
+      <span class="who">jonmagic, switching from ElevenLabs &middot;
+        <a href="https://news.ycombinator.com/item?id=48832850">Hacker News</a></span>
+    </div>
+    <div class="quote">
+      <q>The most natural sounding and small too.</q>
+      <span class="who">zackify &middot;
+        <a href="https://news.ycombinator.com/item?id=48824474">Hacker News</a></span>
+    </div>
+    <div class="quote">
+      <q>I use it to read ebooks that don't have audiobooks and it works pretty good
+      for that.</q>
+      <span class="who">lucumo &middot;
+        <a href="https://news.ycombinator.com/item?id=48829204">Hacker News</a></span>
+    </div>
+  </div>
+  <p class="about">On Kokoro, the open voice model MoxSpeak runs.</p>
+</section>
+
+<section>
   <h2>Questions</h2>
 
 
@@ -397,18 +407,31 @@
   </details>
 
   <details>
+    <summary>Why does it need Accessibility permission?</summary>
+    <p>It is the only way on macOS to read the text you have selected in another app.
+    Without it MoxSpeak still works, but it reads whatever you last copied instead, so you
+    have to press ⌘C first.</p>
+  </details>
+
+  <details id="privacy" open>
+    <summary>Is what I read private?</summary>
+    <p>Yes. The text you select never leaves your Mac. The voice runs on your own
+    machine, so there is nothing to send anywhere and no company on the other end of it.
+    The same goes for your clipboard, your files, and the names of the apps you use.</p>
+    <p>MoxSpeak does send anonymous crash reports and a count of things like "the app
+    launched" or "speech started", so bugs get fixed without anyone having to write in.
+    That is all it sends, it is not tied to you, and you can switch it off under
+    <strong>Advanced &rarr; Send anonymous usage stats</strong>. The full list is
+    <a href="https://github.com/guymorita/moxspeak/blob/main/Sources/MoxSpeakApp/TelemetryPayload.swift">in the source</a>
+    if you want to check rather than take my word for it.</p>
+  </details>
+
+  <details>
     <summary>I installed it and nothing happened.</summary>
     <p>That is expected. MoxSpeak has no window and no Dock icon; it puts a small diamond
     in your menu bar. If you cannot see it, check whether a menu bar manager such as Ice,
     Bartender or Hidden Bar has filed it under hidden items, which is where new icons
     usually land.</p>
-  </details>
-
-  <details>
-    <summary>Why does it need Accessibility permission?</summary>
-    <p>It is the only way on macOS to read the text you have selected in another app.
-    Without it MoxSpeak still works, but it reads whatever you last copied instead, so you
-    have to press ⌘C first.</p>
   </details>
 
   <details>
@@ -429,18 +452,6 @@
     <p>Source-available. You can read, build, modify and audit it; redistributing it is
     not permitted. It is public because you should not have to take anyone's word for
     what an app with Accessibility access does with it.</p>
-  </details>
-  <details id="privacy">
-    <summary>Is what I read private?</summary>
-    <p>Yes. The text you select never leaves your Mac. The voice runs on your own
-    machine, so there is nothing to send anywhere and no company on the other end of it.
-    The same goes for your clipboard, your files, and the names of the apps you use.</p>
-    <p>MoxSpeak does send anonymous crash reports and a count of things like "the app
-    launched" or "speech started", so bugs get fixed without anyone having to write in.
-    That is all it sends, it is not tied to you, and you can switch it off under
-    <strong>Advanced &rarr; Send anonymous usage stats</strong>. The full list is
-    <a href="https://github.com/guymorita/moxspeak/blob/main/Sources/MoxSpeakApp/TelemetryPayload.swift">in the source</a>
-    if you want to check rather than take my word for it.</p>
   </details>
 </section>
 
