@@ -13,7 +13,14 @@ import AppKit
 ///
 /// ## What it is allowed to do
 ///
-/// Three facts and one button. It is not a tour, not a wizard, and not a settings screen —
+/// ## Three steps, one idea each
+///
+/// This was one page, and it had grown three unrelated things competing for the same
+/// glance: where the app lives, what to press, and a permission to grant. Nothing on it
+/// was wrong and there was nowhere for the eye to land. Splitting it is not ceremony —
+/// each screen now asks for exactly one thing, and the whole flow is still three clicks.
+///
+/// It is not a tour, not a wizard, and not a settings screen —
 /// everything here is either something they cannot discover on their own, or something
 /// that stops working later if it is not done now:
 ///
@@ -48,17 +55,27 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
     private let actions: Actions
     private let shortcutLabel: String
     private let shortcutWords: String
+
     private var window: NSWindow?
-    private var accessibilityButton: NSButton?
-    private var accessibilityNote: NSTextField?
-    private var statusIcon: NSImageView?
-    private var statusText: NSTextField?
-    private var startButton: NSButton?
-    private var loginCheckbox: NSButton?
+    private var step = 0
+    private var content: NSStackView?
+    private var dots: [NSView] = []
+    private var backButton: NSButton?
+    private var nextButton: NSButton?
+
     /// Invalidated in `windowWillClose`, which is the only way this window ends. Not in
     /// `deinit`: a nonisolated deinit cannot touch a main-actor, non-Sendable Timer under
     /// strict concurrency, and the controller outlives the window anyway.
     private var pollTimer: Timer?
+
+    private var accessibilityButton: NSButton?
+    private var accessibilityNote: NSTextField?
+    private var statusIcon: NSImageView?
+    private var statusText: NSTextField?
+    private var loginCheckbox: NSButton?
+
+    private static let stepCount = 3
+    private static let permissionStep = 1
 
     init(shortcutLabel: String, shortcutWords: String, actions: Actions) {
         self.shortcutLabel = shortcutLabel
@@ -69,27 +86,20 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
 
     // MARK: - Showing
 
-    /// Brings the window up beneath `statusItemFrame` — the status item's frame in screen
-    /// coordinates — so the arrow points at the real icon rather than at where the icon
-    /// usually is. Nil falls back to the top-right of the main screen, which is where the
-    /// status bar is anyway.
     func show(under statusItemFrame: CGRect?) {
         if window == nil { build() }
         guard let window else { return }
-        refreshAccessibilityState()
+        step = 0
+        render()
         position(window, under: statusItemFrame)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        startPolling()
     }
 
     private func position(_ window: NSWindow, under frame: CGRect?) {
         let screen = NSScreen.main ?? NSScreen.screens.first
         let visible = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
         let size = window.frame.size
-        // Anchored to the status item's centre, then pulled back inside the screen so a
-        // gemstone near the right edge — or hidden behind a notch — cannot push the
-        // window off the display.
         let anchorX = frame.map { $0.midX } ?? (visible.maxX - 40)
         let x = min(max(visible.minX + 12, anchorX - size.width / 2),
                     visible.maxX - size.width - 12)
@@ -97,47 +107,180 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
         window.setFrameOrigin(CGPoint(x: x, y: top - size.height - 10))
     }
 
-    // MARK: - Building
+    // MARK: - Chrome
 
     private func build() {
-        let content = NSView(frame: CGRect(x: 0, y: 0, width: 420, height: 0))
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
 
+        let body = NSStackView()
+        body.orientation = .vertical
+        body.alignment = .centerX
+        body.spacing = 10
+        body.translatesAutoresizingMaskIntoConstraints = false
+        content = body
+
+        // Progress dots. Three of them, so somebody can see this ends.
+        let dotRow = NSStackView()
+        dotRow.orientation = .horizontal
+        dotRow.spacing = 7
+        for _ in 0..<Self.stepCount {
+            let dot = NSView()
+            dot.wantsLayer = true
+            dot.layer?.cornerRadius = 3.5
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            dot.widthAnchor.constraint(equalToConstant: 7).isActive = true
+            dot.heightAnchor.constraint(equalToConstant: 7).isActive = true
+            dots.append(dot)
+            dotRow.addArrangedSubview(dot)
+        }
+
+        let back = NSButton(title: "Back", target: self, action: #selector(goBack))
+        back.bezelStyle = .rounded
+        back.isBordered = false
+        back.contentTintColor = .secondaryLabelColor
+        backButton = back
+
+        let next = NSButton(title: "Next", target: self, action: #selector(goNext))
+        next.bezelStyle = .rounded
+        next.controlSize = .large
+        next.keyEquivalent = "\r"
+        next.bezelColor = .controlAccentColor
+        nextButton = next
+
+        let spacerLeft = NSView(), spacerRight = NSView()
+        let bar = NSStackView(views: [back, spacerLeft, dotRow, spacerRight, next])
+        bar.orientation = .horizontal
+        bar.alignment = .centerY
+        bar.distribution = .equalSpacing
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        spacerLeft.widthAnchor.constraint(greaterThanOrEqualToConstant: 4).isActive = true
+        spacerRight.widthAnchor.constraint(greaterThanOrEqualToConstant: 4).isActive = true
+
+        container.addSubview(body)
+        container.addSubview(bar)
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: 420),
+            // Fixed height: the window must not jump as the steps swap, which reads as a
+            // glitch and moves the button out from under the pointer.
+            container.heightAnchor.constraint(equalToConstant: 366),
+            // Centred in the space above the bar rather than pinned to the top. The
+            // three steps hold different amounts, and top-anchoring left the shortest of
+            // them sitting above a third of a window of nothing.
+            body.centerYAnchor.constraint(equalTo: container.topAnchor, constant: 160),
+            body.topAnchor.constraint(greaterThanOrEqualTo: container.topAnchor, constant: 22),
+            body.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 30),
+            body.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -30),
+            bar.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 22),
+            bar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -22),
+            bar.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -18),
+        ])
+
+        let window = NSWindow(contentRect: .zero,
+                              styleMask: [.titled, .closable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.contentView = container
+        window.delegate = self
+        window.level = .floating
+        window.setContentSize(NSSize(width: 420, height: 366))
+        self.window = window
+    }
+
+    // MARK: - Steps
+
+    @objc private func goNext() {
+        if step == Self.stepCount - 1 { window?.close(); return }
+        step += 1
+        render()
+    }
+
+    @objc private func goBack() {
+        guard step > 0 else { return }
+        step -= 1
+        render()
+    }
+
+    private func render() {
+        guard let content else { return }
+        for view in content.arrangedSubviews { content.removeArrangedSubview(view); view.removeFromSuperview() }
+
+        // Where it lives, then the permission, then the shortcut.
+        //
+        // The permission sits in the middle deliberately. It is the only step that sends
+        // somebody out to System Settings, so it should not be the last thing standing
+        // between them and being finished — and putting the shortcut last means the final
+        // thing on screen is the thing to go and do, at the moment the window disappears.
+        switch step {
+        case 0: buildWhereItLives(into: content)
+        case Self.permissionStep: buildThePermission(into: content)
+        default: buildTheShortcut(into: content)
+        }
+
+        for (index, dot) in dots.enumerated() {
+            dot.layer?.backgroundColor = (index == step
+                ? NSColor.controlAccentColor : NSColor.quaternaryLabelColor).cgColor
+        }
+        backButton?.isHidden = step == 0
+        nextButton?.title = step == Self.stepCount - 1 ? "Start" : "Next"
+        nextButton?.bezelColor = .controlAccentColor
+        refreshAccessibilityState()
+    }
+
+    private func buildWhereItLives(into stack: NSStackView) {
         let icon = NSImageView()
         icon.image = NSApp.applicationIconImage
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.widthAnchor.constraint(equalToConstant: 72).isActive = true
-        icon.heightAnchor.constraint(equalToConstant: 72).isActive = true
+        icon.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 64).isActive = true
 
-        let title = label("MoxSpeak", font: .systemFont(ofSize: 22, weight: .semibold))
+        let title = label("MoxSpeak", font: .systemFont(ofSize: 21, weight: .semibold))
         title.alignment = .center
 
         let hint = MenuBarHintView()
 
-        let whereItIs = label(
-            "Look for this icon at the top of your screen. MoxSpeak has no window and "
-            + "no Dock icon. That is normal.",
-            font: .systemFont(ofSize: 13), secondary: true)
-        whereItIs.alignment = .center
+        let body = label("Look for this icon in your menu bar, at the top of your screen.",
+                         font: .systemFont(ofSize: 13), secondary: true)
+        body.alignment = .center
 
-        let howTo = label("Select any text, anywhere, then press",
-                          font: .systemFont(ofSize: 13))
-        howTo.alignment = .center
+        stack.addArrangedSubview(icon)
+        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(hint)
+        stack.addArrangedSubview(body)
+        stack.setCustomSpacing(6, after: icon)
+        stack.setCustomSpacing(20, after: title)
+        stack.setCustomSpacing(14, after: hint)
+    }
 
-        let key = label(shortcutLabel, font: .systemFont(ofSize: 26, weight: .medium))
+    private func buildTheShortcut(into stack: NSStackView) {
+        let title = label("Select text, then press", font: .systemFont(ofSize: 18))
+        title.alignment = .center
+
+        let key = label(shortcutLabel, font: .systemFont(ofSize: 40, weight: .medium))
         key.alignment = .center
 
-        // The glyphs and the words, together. ⌃ and ⌥ are used by far more people than
-        // can name them — ⌃ is regularly read as ⌘ or as a stray mark — and somebody who
-        // cannot decode the symbols cannot use the app at all. Showing both costs one
-        // line and removes the only step here that can silently fail.
-        let keyWords = label(shortcutWords, font: .systemFont(ofSize: 12), secondary: true)
-        keyWords.alignment = .center
+        let words = label(shortcutWords, font: .systemFont(ofSize: 13), secondary: true)
+        words.alignment = .center
 
-        // A status line above the button, because the state it reports is the difference
-        // between the app in the advert and a clipboard reader. Amber rather than red:
-        // nothing is broken, it just is not set up yet, and red would say something has
-        // gone wrong that the user has to repair.
+        let body = label("Anywhere: a web page, a document, an email. MoxSpeak reads what "
+                         + "you have selected.", font: .systemFont(ofSize: 13), secondary: true)
+        body.alignment = .center
+
+        stack.addArrangedSubview(NSView())
+        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(key)
+        stack.addArrangedSubview(words)
+        stack.addArrangedSubview(body)
+        stack.setCustomSpacing(26, after: stack.arrangedSubviews[0])
+        stack.setCustomSpacing(6, after: title)
+        stack.setCustomSpacing(2, after: key)
+        stack.setCustomSpacing(24, after: words)
+    }
+
+    private func buildThePermission(into stack: NSStackView) {
         let statusIconView = NSImageView()
         statusIconView.imageScaling = .scaleProportionallyUpOrDown
         statusIconView.translatesAutoresizingMaskIntoConstraints = false
@@ -159,71 +302,33 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
         button.controlSize = .large
         accessibilityButton = button
 
-        let note = label(
-            "Lets MoxSpeak read what you've selected. Without it, it reads whatever "
-            + "you last copied.",
-            font: .systemFont(ofSize: 11), secondary: true)
+        let note = label("", font: .systemFont(ofSize: 12), secondary: true)
         note.alignment = .center
         accessibilityNote = note
 
         let login = NSButton(checkboxWithTitle: "Open MoxSpeak at login",
                              target: nil, action: nil)
-        login.state = .on
+        login.state = loginCheckbox?.state ?? .on
         login.isHidden = !LaunchAtLogin.isAvailable
         loginCheckbox = login
 
-        let start = NSButton(title: "Start", target: self, action: #selector(finish))
-        start.bezelStyle = .rounded
-        start.controlSize = .large
-        startButton = start
-
-        let privacy = label(
-            "Sends anonymous usage stats. No text you select or copy ever leaves your "
-            + "Mac. Turn it off under Advanced.",
-            font: .systemFont(ofSize: 10), secondary: true)
+        let privacy = label("Sends anonymous usage stats. No text you select or copy ever "
+                            + "leaves your Mac.", font: .systemFont(ofSize: 10), secondary: true)
         privacy.alignment = .center
 
-        let stack = NSStackView(views: [
-            icon, title, hint, whereItIs,
-            separator(), howTo, key, keyWords, separator(),
-            statusRow, button, note, login, start, privacy,
-        ])
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = 10
-        stack.setCustomSpacing(4, after: icon)
-        stack.setCustomSpacing(12, after: title)
-        stack.setCustomSpacing(8, after: hint)
-        stack.setCustomSpacing(14, after: whereItIs)
-        stack.setCustomSpacing(2, after: howTo)
-        stack.setCustomSpacing(1, after: key)
-        stack.setCustomSpacing(16, after: keyWords)
-        stack.setCustomSpacing(8, after: statusRow)
-        stack.setCustomSpacing(6, after: button)
-        stack.setCustomSpacing(18, after: note)
-        stack.setCustomSpacing(18, after: login)
-        stack.edgeInsets = NSEdgeInsets(top: 24, left: 30, bottom: 20, right: 30)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: content.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            content.widthAnchor.constraint(equalToConstant: 420),
-        ])
+        stack.addArrangedSubview(NSView())
+        stack.addArrangedSubview(statusRow)
+        stack.addArrangedSubview(button)
+        stack.addArrangedSubview(note)
+        stack.addArrangedSubview(login)
+        stack.addArrangedSubview(privacy)
+        stack.setCustomSpacing(30, after: stack.arrangedSubviews[0])
+        stack.setCustomSpacing(12, after: statusRow)
+        stack.setCustomSpacing(8, after: button)
+        stack.setCustomSpacing(22, after: note)
+        stack.setCustomSpacing(20, after: login)
 
-        let window = NSWindow(contentRect: .zero,
-                              styleMask: [.titled, .closable, .fullSizeContentView],
-                              backing: .buffered, defer: false)
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = true
-        window.contentView = content
-        window.delegate = self
-        window.level = .floating
-        window.setContentSize(content.fittingSize)
-        self.window = window
+        startPolling()
     }
 
     private func label(_ text: String, font: NSFont, secondary: Bool = false) -> NSTextField {
@@ -231,32 +336,20 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
         field.font = font
         field.textColor = secondary ? .secondaryLabelColor : .labelColor
         field.isSelectable = false
-        field.preferredMaxLayoutWidth = 360
+        field.preferredMaxLayoutWidth = 356
         field.setContentHuggingPriority(.defaultHigh, for: .vertical)
         return field
-    }
-
-    private func separator() -> NSBox {
-        let box = NSBox()
-        box.boxType = .separator
-        box.translatesAutoresizingMaskIntoConstraints = false
-        box.widthAnchor.constraint(equalToConstant: 320).isActive = true
-        return box
     }
 
     // MARK: - Accessibility
 
     @objc private func enableAccessibility() {
-        // The system prompt is modal-ish and opens System Settings. Trust is granted out
-        // there, not here, so the button cannot report success — the poll below is what
-        // notices, which is also what makes it work if they approve it much later.
         _ = actions.requestAccessibility()
         startPolling()
     }
 
-    /// Accessibility approval happens in System Settings, and macOS sends no notification
-    /// when it lands. Polling while this window is up is the only way to reflect it, and
-    /// it stops the moment the window goes away.
+    /// Approval happens in System Settings and macOS sends no notification when it lands,
+    /// so polling while the permission step is up is the only way to reflect it.
     private func startPolling() {
         pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.7, repeats: true) { [weak self] _ in
@@ -264,21 +357,14 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Reflects the one thing on this window that can be in two states, and moves the
-    /// emphasis with it.
-    ///
-    /// The first version of this got the hierarchy exactly backwards: "Start" was the
-    /// default button, rendered blue and bound to Return, while "Turn on
-    /// Select-to-Speak" sat beside it as an ordinary control. So the loudest thing on the
-    /// window, and the one Return pressed, was the button that skips the only setup step
-    /// there is. People did what the design told them to do.
-    ///
-    /// Now the emphasis is wherever the remaining work is. Off: an amber warning, the
-    /// permission button is the default, and Start is demoted to "Skip for now" so
-    /// choosing it is a decision rather than a reflex. On: a green check, the permission
-    /// button becomes an inert confirmation, and Start becomes the default.
+    /// The emphasis follows the remaining work. Not granted: an amber warning and the
+    /// permission button is the loud one. Granted: a green check and Start is.
     private func refreshAccessibilityState() {
-        guard let button = accessibilityButton, let start = startButton else { return }
+        guard let next = nextButton else { return }
+        guard let button = accessibilityButton, step == Self.permissionStep else {
+            next.bezelColor = .controlAccentColor
+            return
+        }
         let trusted = actions.isAccessibilityTrusted()
 
         if trusted {
@@ -287,15 +373,12 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
             statusIcon?.contentTintColor = .systemGreen
             statusText?.stringValue = "Select-to-Speak is on"
             statusText?.textColor = .secondaryLabelColor
-
             button.isEnabled = false
             button.title = "Select-to-Speak is on"
-            button.keyEquivalent = ""
+            button.bezelColor = nil
             accessibilityNote?.stringValue = "MoxSpeak will read whatever you've selected."
-
-            start.title = "Start"
-            start.keyEquivalent = "\r"
-
+            next.title = "Next"
+            next.bezelColor = .controlAccentColor
             pollTimer?.invalidate()
             pollTimer = nil
         } else {
@@ -304,42 +387,24 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
             statusIcon?.contentTintColor = .systemOrange
             statusText?.stringValue = "One step left"
             statusText?.textColor = .systemOrange
-
             button.isEnabled = true
             button.title = "Turn on Select-to-Speak"
-            button.keyEquivalent = "\r"
+            button.bezelColor = .controlAccentColor
             accessibilityNote?.stringValue =
                 "Without this, MoxSpeak reads whatever you last copied instead of what "
                 + "you've selected."
-
-            start.title = "Skip for now"
-            start.keyEquivalent = ""
+            next.title = "Skip for now"
+            next.bezelColor = nil
         }
-        // Only one button may own Return, and AppKit keeps its own pointer to it.
-        window?.defaultButtonCell = (trusted ? start : button).cell as? NSButtonCell
-
-        // Tint the primary action explicitly rather than relying on the default-button
-        // highlight. AppKit only paints that blue while the window is key, and this window
-        // can perfectly well be looked at without being focused — the first build of this
-        // rendered both buttons identically grey, so the whole point of the hierarchy was
-        // lost exactly when somebody was reading it rather than driving it.
-        let primary = trusted ? start : button
-        let secondary = trusted ? button : start
-        primary.bezelColor = .controlAccentColor
-        secondary.bezelColor = nil
     }
 
     // MARK: - Finishing
 
-    @objc private func finish() {
-        window?.close()
-    }
-
     func windowWillClose(_ notification: Notification) {
         pollTimer?.invalidate()
         pollTimer = nil
-        // Closing the window *is* finishing, whichever control did it — the red button
-        // and Start must not leave different amounts of setup done.
-        actions.finish(loginCheckbox?.state == .on)
+        // Closing the window is finishing, whichever control did it. The red button and
+        // Start must not leave different amounts of setup done.
+        actions.finish(loginCheckbox?.state != .off)
     }
 }

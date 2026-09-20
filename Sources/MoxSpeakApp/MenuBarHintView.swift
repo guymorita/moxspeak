@@ -31,7 +31,7 @@ final class MenuBarHintView: NSView {
     /// Sized to what it holds rather than to a round number. At 232 the diamond sat a
     /// clear 60pt from the nearest stand-in dot, which read as a gap rather than as a row
     /// of neighbours and made the strip look half empty.
-    override var intrinsicContentSize: NSSize { NSSize(width: 190, height: 34) }
+    override var intrinsicContentSize: NSSize { NSSize(width: 218, height: 34) }
     override var isFlipped: Bool { false }
     override var wantsUpdateLayer: Bool { false }
 
@@ -51,7 +51,7 @@ final class MenuBarHintView: NSView {
     /// Where the icon sits. Left of the stand-in dots, which are left of the clock, so the
     /// row reads right to left the way a real menu bar's status area does.
     private var glyphCentre: NSPoint {
-        NSPoint(x: bounds.minX + 40, y: bounds.midY)
+        NSPoint(x: bounds.minX + 62, y: bounds.midY)
     }
 
     override func layout() {
@@ -141,5 +141,32 @@ final class MenuBarHintView: NSView {
                                         width: 7, height: 7)).fill()
             x -= 18
         }
+
+        // Two arrows flanking the icon, pointing at it. The halo alone says "something
+        // here matters" without saying which thing, and on a strip that deliberately
+        // contains several shapes that is not enough: the first build of this was read as
+        // a row of buttons. Arrows name the target.
+        let centre = glyphCentre
+        NSColor.controlAccentColor.setFill()
+        arrow(pointingRightAt: NSPoint(x: centre.x - 19, y: centre.y)).fill()
+        arrow(pointingLeftAt: NSPoint(x: centre.x + 19, y: centre.y)).fill()
+    }
+
+    private func arrow(pointingRightAt tip: NSPoint) -> NSBezierPath {
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: tip.x, y: tip.y))
+        path.line(to: NSPoint(x: tip.x - 7, y: tip.y + 5))
+        path.line(to: NSPoint(x: tip.x - 7, y: tip.y - 5))
+        path.close()
+        return path
+    }
+
+    private func arrow(pointingLeftAt tip: NSPoint) -> NSBezierPath {
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: tip.x, y: tip.y))
+        path.line(to: NSPoint(x: tip.x + 7, y: tip.y + 5))
+        path.line(to: NSPoint(x: tip.x + 7, y: tip.y - 5))
+        path.close()
+        return path
     }
 }

@@ -22,8 +22,18 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-GRID = 824 / 1024          # Apple's icon grid: artwork fills 824 of 1024.
-SUPERELLIPSE_N = 5.0       # |x|^n + |y|^n = 1 approximates the macOS squircle.
+# Measured off the shipping system icons rather than taken from the template. Apple's
+# published grid puts the artwork at 824 of 1024, but Mail, Notes, Music and Safari all
+# actually fill 850 — 83.0% across the centre, identical to one decimal place. Built to
+# the documented 824 the icon renders about 3% smaller than everything beside it in the
+# Dock and the app switcher, which is small enough to look like a mistake rather than a
+# choice, and is exactly what got noticed.
+GRID = 850 / 1024
+# |x|^n + |y|^n = 1 approximates the macOS squircle. 5.0 is the figure usually quoted,
+# but fitted against the corner profile of the shipping system icons the best match is
+# 4.4: at 5.0 the corners are measurably squarer than Mail's and Notes'. Fitted by
+# sampling icon width at several heights and minimising the difference.
+SUPERELLIPSE_N = 4.4
 SUPERSAMPLE = 8
 # Below this pixel size, zoom onto the subject instead of showing the whole scene.
 SMALL_SIZE_THRESHOLD = 40
