@@ -43,16 +43,28 @@ echo "==> creating read-write image"
 hdiutil create -srcfolder "${STAGE}" -volname "${VOLUME}" -fs HFS+ \
   -format UDRW -size "${SIZE_KB}k" "${RW}" -quiet
 
-MOUNT="/Volumes/${VOLUME}"
+# A unique mountpoint, not /Volumes/${VOLUME}.
+#
+# The obvious mountpoint is already taken whenever a copy of the shipped DMG is mounted,
+# which is exactly what happens on the machine that builds releases: open the download to
+# check it, leave it mounted, and the next build silently attaches somewhere else while
+# the Finder step drives the OTHER volume. Observed as a build that produced no disk image
+# and reported success, leaving the previous release's DMG in place with its old contents.
+MOUNT="/Volumes/${VOLUME}-build-$$"
 hdiutil attach "${RW}" -mountpoint "${MOUNT}" -nobrowse -quiet
 
 echo "==> setting the window layout"
 # Finder is the only thing that can write these window attributes. It can fail — no
 # Automation permission, no window server on a build box — and a DMG with default
 # layout still installs perfectly well, so this is advisory rather than fatal.
-if ! osascript <<APPLESCRIPT >/dev/null 2>&1
+# Referenced by path rather than by name, for the same reason. `disk "MoxSpeak"` is
+# ambiguous the moment two volumes share the name, and Finder picks one of them.
+#
+# Wrapped in a timeout: a Finder that is waiting on something never returns, and the
+# layout is cosmetic. A DMG with the default view installs perfectly well.
+if ! perl -e 'alarm shift; exec @ARGV' 60 osascript <<APPLESCRIPT >/dev/null 2>&1
 tell application "Finder"
-  tell disk "${VOLUME}"
+  tell folder (POSIX file "${MOUNT}" as alias)
     open
     set current view of container window to icon view
     set toolbar visible of container window to false
