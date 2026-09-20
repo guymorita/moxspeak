@@ -1,6 +1,7 @@
 # MoxSpeak
 
-Select text anywhere on your Mac, press one key, hear it read aloud in a good voice.
+Select text anywhere on your Mac, press Control+Option+S, and hear it read aloud in a
+good voice.
 
 No server to start, no account, no network. The voice model runs on your machine and is
 bundled with the app, so it works on a plane.
