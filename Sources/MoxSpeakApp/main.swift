@@ -57,6 +57,13 @@ final class MoxSpeakAppDelegate: NSObject, NSApplicationDelegate {
                      + "copied from here on counts as freshly copied and will be spoken "
                      + "when nothing is selected; what is on it already will not")
 
+        // Before anything is registered. Two copies both claim ⌃⌥S, Carbon gives it to
+        // whichever asked first, and the loser sits in the menu bar doing nothing.
+        if SingleInstance.shouldYield() {
+            NSApp.terminate(nil)
+            return
+        }
+
         let controller = AppController(port: Self.port)
         self.controller = controller
         controller.start()
