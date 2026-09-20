@@ -21,6 +21,15 @@ final class MoxSpeakAppDelegate: NSObject, NSApplicationDelegate {
 
     private var controller: AppController?
 
+    /// URLs that arrived before the controller existed.
+    ///
+    /// Opening a `moxspeak://` URL launches the app when it is not already running, and
+    /// LaunchServices delivers the URL at the same moment — sometimes before
+    /// `applicationDidFinishLaunching` has finished building anything to hand it to.
+    /// Dropping those would make the scheme work reliably only on the second try, which
+    /// is the kind of bug people write off as "it's flaky".
+    private var pendingURLs: [URL] = []
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Logged every launch as a standing invariant, not as a diagnostic. The app's
         // whole feature set — Carbon hotkeys, NSStatusItem, MPRemoteCommandCenter,
@@ -51,6 +60,27 @@ final class MoxSpeakAppDelegate: NSObject, NSApplicationDelegate {
         let controller = AppController(port: Self.port)
         self.controller = controller
         controller.start()
+
+        let queued = pendingURLs
+        pendingURLs = []
+        for url in queued { open(url, with: controller) }
+    }
+
+    /// `moxspeak://speak`, `://pause`, `://stop`. The automation surface every launcher
+    /// on macOS can already reach: Raycast, Alfred, Shortcuts, Keyboard Maestro, or
+    /// `open` in a shell script. See `URLCommand`.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            if let controller { open(url, with: controller) } else { pendingURLs.append(url) }
+        }
+    }
+
+    private func open(_ url: URL, with controller: AppController) {
+        guard let command = URLCommand(url) else {
+            AppLog.write("url: ignored \(url.absoluteString) — not a command")
+            return
+        }
+        controller.handle(command)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

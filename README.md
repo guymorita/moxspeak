@@ -55,6 +55,22 @@ If your menu bar icon does not appear, check whether a menu bar manager such as 
 Bartender or Hidden Bar has put it in a hidden section. New icons land there by default in
 Ice, which is reproducible and not a MoxSpeak bug.
 
+## Using it from Raycast, Alfred or Shortcuts
+
+MoxSpeak answers a `moxspeak://` URL, so any launcher can drive it without an extension:
+
+```bash
+open -g "moxspeak://speak"    # read the selection
+open -g "moxspeak://pause"
+open -g "moxspeak://stop"
+```
+
+The `-g` matters: without it macOS brings MoxSpeak to the front, it becomes the frontmost
+application, and the selection it goes looking for is its own.
+
+Ready-made Raycast script commands and setup notes for Alfred and the rest are in
+[Integrations/](Integrations/). The built-in shortcuts keep working; this is an extra door.
+
 ## Privacy
 
 The text you select or copy never leaves your Mac. Speech is synthesized locally; there

@@ -610,6 +610,34 @@ final class AppController {
     /// application, so there is no longer another app's selection to read and no app to
     /// usefully send ⌘C to — the only honest thing this item can read is the clipboard,
     /// which is what its title says it reads.
+    /// Acts on a `moxspeak://` URL. See `URLCommand` for why the scheme exists.
+    func handle(_ command: URLCommand) {
+        AppLog.write("url: \(command.logName)")
+        // A launcher is still frontmost, and its window still dismissing, at the moment
+        // it runs the command that sent us here. Reading the selection now asks Raycast
+        // what Raycast has selected. Only the selection-reading case waits; see
+        // `URLCommand.focusSettlingDelay`.
+        let delay = command.focusSettlingDelay
+        guard delay > 0 else { return perform(command) }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            self?.perform(command)
+        }
+    }
+
+    private func perform(_ command: URLCommand) {
+        switch command {
+        // speakText, not speakClipboard: the URL is standing in for the hotkey, so it
+        // must take the same three-tier path and read the selection. speakClipboard is
+        // the menu item, which deliberately skips straight to the clipboard because the
+        // act of opening a menu destroys the selection it would otherwise have read.
+        case .speak: speakText()
+        case .speakText(let text): speak(text)
+        case .pause: togglePause()
+        case .stop: stop()
+        }
+    }
+
     func speakClipboard() {
         menuBar?.setSelectToSpeak(active: SelectionReader.isTrusted)
         guard let text = SelectionReader.clipboardText() else {
@@ -649,7 +677,7 @@ final class AppController {
         speak(text)
     }
 
-    private func speak(_ text: String) {
+    func speak(_ text: String) {
         teardownPlayback()
         lastError = nil
         idleNote = "Ready"

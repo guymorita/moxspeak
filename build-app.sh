@@ -223,6 +223,17 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<!-- The automation surface. One scheme reaches every launcher on macOS without
+	     depending on any of their SDKs; see Sources/MoxSpeakApp/URLCommand.swift. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>${BUNDLE_ID}</string>
+			<key>CFBundleURLSchemes</key>
+			<array><string>moxspeak</string></array>
+		</dict>
+	</array>
 ${ICON_KEYS}
 </dict>
 </plist>
