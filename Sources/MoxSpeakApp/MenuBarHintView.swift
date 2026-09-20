@@ -28,7 +28,10 @@ final class MenuBarHintView: NSView {
     private let halo = CAShapeLayer()
     private let glyph = CALayer()
 
-    override var intrinsicContentSize: NSSize { NSSize(width: 232, height: 34) }
+    /// Sized to what it holds rather than to a round number. At 232 the diamond sat a
+    /// clear 60pt from the nearest stand-in dot, which read as a gap rather than as a row
+    /// of neighbours and made the strip look half empty.
+    override var intrinsicContentSize: NSSize { NSSize(width: 190, height: 34) }
     override var isFlipped: Bool { false }
     override var wantsUpdateLayer: Bool { false }
 
@@ -48,7 +51,7 @@ final class MenuBarHintView: NSView {
     /// Where the icon sits. Left of the stand-in dots, which are left of the clock, so the
     /// row reads right to left the way a real menu bar's status area does.
     private var glyphCentre: NSPoint {
-        NSPoint(x: bounds.minX + 46, y: bounds.midY)
+        NSPoint(x: bounds.minX + 40, y: bounds.midY)
     }
 
     override func layout() {
