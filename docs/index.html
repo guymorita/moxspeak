@@ -109,6 +109,34 @@
     padding: 0;
   }
 
+
+  /* ---- laurel + quotes ---- */
+  .laurel {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    margin: 34px auto 0; color: var(--ink-soft);
+  }
+  .laurel svg { width: 30px; height: 42px; fill: currentColor; opacity: 0.5; }
+  .laurel svg.flip { transform: scaleX(-1); }
+  .laurel .claim { text-align: center; line-height: 1.25; }
+  .laurel .claim b { display: block; font-family: var(--display); font-weight: 700;
+                     font-size: 1.05rem; color: var(--ink); }
+  .laurel .claim span { font-size: 0.76rem; color: var(--ink-faint); }
+
+  .quotes { display: grid; gap: 14px; margin: 30px 0 0; }
+  @media (min-width: 680px) { .quotes { grid-template-columns: repeat(3, 1fr); } }
+  .quote {
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 11px;
+    padding: 16px 16px 13px; font-size: 0.92rem; color: var(--ink-soft);
+    display: flex; flex-direction: column; gap: 9px;
+  }
+  .quote q { quotes: none; color: var(--ink); }
+  .quote q::before, .quote q::after { content: ""; }
+  .quote .who { font-size: 0.78rem; color: var(--ink-faint); margin-top: auto; }
+  .quote .who a { color: var(--ink-faint); text-decoration: underline;
+                  text-underline-offset: 2px; }
+  .about { font-size: 0.78rem; color: var(--ink-faint); text-align: center;
+           margin: 26px 0 0; }
+
   /* ---- the one demo: the keystroke ---- */
   .keys {
     margin: 52px auto 0;
@@ -197,6 +225,16 @@
     <p class="brew">or <code>brew install --cask guymorita/tap/moxspeak</code></p>
   </div>
 
+
+  <div class="laurel">
+    <svg viewBox="0 0 44 62" aria-hidden="true"><path d="M31 57 C24 46 18 32 15 18 C14 12 13 8 13 4" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><ellipse cx="32.4" cy="52.1" rx="8.4" ry="3.5" transform="rotate(-58 32.4 52.1)"/><ellipse cx="30.8" cy="44.3" rx="7.7" ry="3.2" transform="rotate(-52 30.8 44.3)"/><ellipse cx="28.3" cy="36.5" rx="7.0" ry="3.0" transform="rotate(-47 28.3 36.5)"/><ellipse cx="25.5" cy="28.7" rx="6.3" ry="2.8" transform="rotate(-41 25.5 28.7)"/><ellipse cx="22.3" cy="20.9" rx="5.6" ry="2.5" transform="rotate(-35 22.3 20.9)"/><ellipse cx="18.8" cy="13.0" rx="4.9" ry="2.2" transform="rotate(-30 18.8 13.0)"/><ellipse cx="15.1" cy="5.1" rx="4.2" ry="2.0" transform="rotate(-24 15.1 5.1)"/></svg>
+    <div class="claim">
+      <b>#1 on TTS Arena</b>
+      <span>Kokoro, the voice model inside MoxSpeak &middot; 2025</span>
+    </div>
+    <svg class="flip" viewBox="0 0 44 62" aria-hidden="true"><path d="M31 57 C24 46 18 32 15 18 C14 12 13 8 13 4" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><ellipse cx="32.4" cy="52.1" rx="8.4" ry="3.5" transform="rotate(-58 32.4 52.1)"/><ellipse cx="30.8" cy="44.3" rx="7.7" ry="3.2" transform="rotate(-52 30.8 44.3)"/><ellipse cx="28.3" cy="36.5" rx="7.0" ry="3.0" transform="rotate(-47 28.3 36.5)"/><ellipse cx="25.5" cy="28.7" rx="6.3" ry="2.8" transform="rotate(-41 25.5 28.7)"/><ellipse cx="22.3" cy="20.9" rx="5.6" ry="2.5" transform="rotate(-35 22.3 20.9)"/><ellipse cx="18.8" cy="13.0" rx="4.9" ry="2.2" transform="rotate(-30 18.8 13.0)"/><ellipse cx="15.1" cy="5.1" rx="4.2" ry="2.0" transform="rotate(-24 15.1 5.1)"/></svg>
+  </div>
+
   <div class="keys">
     <p>Select any text, anywhere, then press</p>
     <div class="combo">
@@ -204,6 +242,28 @@
     </div>
     <p class="said">Control + Option + S</p>
   </div>
+
+  <div class="quotes">
+    <div class="quote">
+      <q>Keeps up really well until you get to their larger models with their
+      professional voices.</q>
+      <span class="who">rnxrx, comparing it to ElevenLabs &middot;
+        <a href="https://news.ycombinator.com/item?id=48825228">Hacker News</a></span>
+    </div>
+    <div class="quote">
+      <q>The most natural sounding and small too.</q>
+      <span class="who">zackify &middot;
+        <a href="https://news.ycombinator.com/item?id=48824474">Hacker News</a></span>
+    </div>
+    <div class="quote">
+      <q>I use it to read ebooks that don't have audiobooks and it works pretty good
+      for that.</q>
+      <span class="who">lucumo &middot;
+        <a href="https://news.ycombinator.com/item?id=48829204">Hacker News</a></span>
+    </div>
+  </div>
+  <p class="about">Those are about Kokoro, the open voice model MoxSpeak runs, not about
+  MoxSpeak itself. Every one links to the comment it came from.</p>
 </header>
 
 <section>
