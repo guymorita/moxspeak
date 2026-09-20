@@ -289,6 +289,33 @@ if [ -n "${MOXSPEAK_NOTARIZE:-}" ]; then
     rm -rf "$(dirname "${NOTARIZE_ZIP}")"
 fi
 
+# --- the disk image people download ------------------------------------------------
+#
+# Built after stapling so the app inside carries its own ticket, which is what lets a
+# first launch succeed on a Mac with no network. The DMG is then notarized and stapled
+# in its own right: Gatekeeper checks the ticket on the container the user actually
+# double-clicks, and a stapled DMG means that check never has to reach Apple either.
+if [ -z "${MOXSPEAK_NO_DMG:-}" ]; then
+    echo
+    echo "==> disk image"
+    DMG="${BUILD_DIR}/${APP_NAME}.dmg"
+    Scripts/make-dmg.sh "${APP}" "${DMG}" | sed 's/^/    /'
+
+    if [ -n "${MOXSPEAK_NOTARIZE:-}" ]; then
+        codesign -s "${SIGN_ID}" --force --timestamp "${DMG}"
+        echo "==> notarizing the disk image (a few minutes)"
+        if xcrun notarytool submit "${DMG}" \
+               --keychain-profile "${MOXSPEAK_NOTARY_PROFILE:-moxspeak-notary}" \
+               --wait --timeout 20m; then
+            xcrun stapler staple "${DMG}"
+            spctl -a -vv -t open --context context:primary-signature "${DMG}" 2>&1 | sed 's/^/    /'
+        else
+            echo "    disk image notarization failed" >&2
+            exit 1
+        fi
+    fi
+fi
+
 echo
 echo "==> size"
 # MiB throughout (du reports 1024-byte blocks); the zipped line also gives the decimal MB
