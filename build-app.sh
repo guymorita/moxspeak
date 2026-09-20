@@ -163,6 +163,38 @@ cp -R "${MODEL_SRC}/voices" "${APP}/Contents/Resources/Models/voices"
 VOICE_COUNT=$(find "${APP}/Contents/Resources/Models/voices" -name '*.safetensors' | wc -l | tr -d ' ')
 echo "    $(basename "${WEIGHTS}") + ${VOICE_COUNT} voices"
 
+# Licences travel with the binary, not just with the repo. Apache-2.0 section 4(a)
+# requires it of anyone redistributing the components MoxSpeak bundles, and a repo
+# nobody downloaded is not a copy given to the recipient. The app's Advanced menu
+# opens THIRD-PARTY-NOTICES.md from here.
+# --- app icon ---------------------------------------------------------------------
+#
+# Regenerated from the artwork every build rather than committed as a binary blob, so
+# the .icns can never drift from Assets/icon-source.png. `Scripts/make-icon.py` masks
+# it into Apple's squircle grid and crops in for the small sizes; see that file.
+#
+# LSUIElement means there is no Dock icon, but this is still what shows in Finder, in
+# Get Info, in the installer window, and as the DMG's volume icon.
+if [[ -f Assets/icon-source.png ]]; then
+  echo "==> building app icon"
+  if python3 Scripts/make-icon.py Assets/icon-source.png "${APP}/Contents/Resources/${APP_NAME}.icns"; then
+    ICON_KEYS=$'\t<key>CFBundleIconFile</key>\n\t<string>'"${APP_NAME}"$'</string>\n\t<key>CFBundleIconName</key>\n\t<string>'"${APP_NAME}"$'</string>'
+  else
+    echo "    warning: icon generation failed — shipping without one" >&2
+    ICON_KEYS=""
+  fi
+else
+  echo "    warning: Assets/icon-source.png missing — shipping without an icon" >&2
+  ICON_KEYS=""
+fi
+
+echo "==> copying licences"
+mkdir -p "${APP}/Contents/Resources/licenses"
+cp LICENSE "${APP}/Contents/Resources/"
+cp THIRD-PARTY-NOTICES.md "${APP}/Contents/Resources/"
+cp licenses/*.txt "${APP}/Contents/Resources/licenses/"
+echo "    LICENSE, THIRD-PARTY-NOTICES.md, $(ls licenses | wc -l | tr -d ' ') licence texts"
+
 cat > "${APP}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -191,6 +223,7 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+${ICON_KEYS}
 </dict>
 </plist>
 PLIST

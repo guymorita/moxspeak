@@ -18,3 +18,6 @@ Models/
 
 # Prebuilt MLX Metal library (see Scripts/build-metallib.sh)
 *.metallib
+
+# Generated from Assets/icon-source.png at build time
+Assets/MoxSpeak.icns
