@@ -90,6 +90,13 @@ public actor NativeSpeechProvider: SpeechProvider {
     /// and the last two do not, so the cap has to be large enough that ordinary prose
     /// never reaches the word rung.
     ///
+    /// **350 now, up from 200.** An essay paused after "the well" in "potential to become
+    /// the well balanced contributor" — a 310-character sentence with no commas in it,
+    /// which at 200 had to be broken somewhere and was broken where the cap fell. At 350
+    /// it is one chunk and the question does not arise. Measured at 350: 334 phonemes
+    /// against a 510 ceiling, and 7.2x realtime, so the renderer stays far ahead of
+    /// playback. Time to first sound is untouched, because  is still 100.
+    ///
     /// **This was 100, and 100 was too small.** It was chosen as "about the smallest chunk
     /// that still holds a whole typical English sentence", with a note admitting the
     /// acoustic cost was unmeasured and that the number should go up if it turned out to be
@@ -126,7 +133,7 @@ public actor NativeSpeechProvider: SpeechProvider {
     ///   against the 510-token context window. Different question, different number.
     public nonisolated var recommendedCharacterCap: Int { Self.measuredCharacterCap }
 
-    static let measuredCharacterCap = 200
+    static let measuredCharacterCap = 350
 
     /// Ceiling on MLX's total allocation (`MLX.Memory.memoryLimit`), applied once when the
     /// model loads.

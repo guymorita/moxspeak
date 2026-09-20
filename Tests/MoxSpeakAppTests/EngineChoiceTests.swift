@@ -70,7 +70,7 @@ import Foundation
     let native = EngineRuntime(choice: .native, port: 8880)
     let http = EngineRuntime(choice: .http, port: 8880)
 
-    #expect(native.session.characterCap == 200)
+    #expect(native.session.characterCap == 350)
     #expect(http.session.characterCap == 150)
     #expect(native.provider.recommendedCharacterCap == native.session.characterCap)
     #expect(http.provider.recommendedCharacterCap == http.session.characterCap)

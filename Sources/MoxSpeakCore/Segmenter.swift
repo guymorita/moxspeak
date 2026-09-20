@@ -273,9 +273,30 @@ public struct Segmenter: Sendable {
             }
             let added = current.isEmpty ? word.count : word.count + 1
             if length + added > options.characterCap, !current.isEmpty {
-                flushLine()
-                current = [(word, absStart)]
-                length = word.count
+                // Break where a speaker would breathe, not wherever the cap happened to
+                // fall. Packing greedily put a boundary after "the well" in "potential to
+                // become the well balanced contributor", which is heard as a pause in the
+                // middle of a noun phrase — and worse, as the noun "well".
+                //
+                // So back up to the last word that starts a phrase and break in front of
+                // it instead. Only if that does not throw away too much of the chunk:
+                // below `minimumFill` the saving in awkwardness is not worth the extra
+                // seam, and a long run with no function word in it has no better answer
+                // than the cap anyway.
+                let breakIndex = Self.phraseBreak(in: current,
+                                                  notBefore: Int(Double(options.characterCap)
+                                                                 * Self.minimumFill))
+                if let breakIndex {
+                    let carried = Array(current[breakIndex...])
+                    current = Array(current[..<breakIndex])
+                    flushLine()
+                    current = carried
+                    length = carried.map(\.text.count).reduce(0, +) + carried.count - 1
+                } else {
+                    flushLine()
+                }
+                current.append((word, absStart))
+                length += current.count == 1 ? word.count : word.count + 1
             } else {
                 current.append((word, absStart))
                 length += added
@@ -284,6 +305,50 @@ public struct Segmenter: Sendable {
         flushLine()
         return pieces
     }
+
+
+    /// Where in a run of words a break would sound deliberate.
+    ///
+    /// Returns the index of the last word that opens a phrase — a preposition, a
+    /// conjunction, a relative pronoun — so the caller can break immediately before it.
+    /// Nil when there is no such word late enough in the run to be worth taking, in which
+    /// case the cap decides and the break falls wherever it falls.
+    ///
+    /// `notBefore` is a character count: a break earlier than this leaves too little in
+    /// the outgoing chunk to be worth the extra seam.
+    static func phraseBreak(in words: [(text: String, start: Int)],
+                            notBefore: Int) -> Int? {
+        var consumed = 0
+        var best: Int?
+        for (index, word) in words.enumerated() {
+            if index > 0, consumed >= notBefore,
+               phraseOpeners.contains(word.text.lowercased()
+                   .trimmingCharacters(in: .punctuationCharacters)) {
+                best = index
+            }
+            consumed += word.text.count + (index > 0 ? 1 : 0)
+        }
+        return best
+    }
+
+    /// How much of the cap a chunk must already hold before a nicer break point is worth
+    /// taking. Below this the saving in awkwardness costs an extra seam and a shorter
+    /// chunk, which is a worse trade.
+    static let minimumFill = 0.55
+
+    /// Words that begin a phrase in English, so a pause in front of one sounds like a
+    /// breath rather than an interruption. Deliberately short and closed-class: this is
+    /// not a parser, and a longer list would start breaking in front of words that carry
+    /// the sentence rather than join it.
+    static let phraseOpeners: Set<String> = [
+        "and", "or", "but", "so", "yet", "nor",
+        "to", "of", "in", "on", "at", "by", "for", "from", "with", "without",
+        "into", "onto", "about", "after", "before", "during", "through", "under", "over",
+        "within", "upon", "between", "among", "against", "across", "toward", "towards",
+        "throughout", "beyond", "beneath", "behind",
+        "as", "than", "that", "which", "who", "whom", "whose", "when", "where", "while",
+        "because", "although", "though", "if", "unless", "until", "since",
+    ]
 
     /// Splits a single overlong word into `characterCap`-sized fragments, iterating by
     /// `Character` (extended grapheme cluster) rather than byte or Unicode scalar, so a
