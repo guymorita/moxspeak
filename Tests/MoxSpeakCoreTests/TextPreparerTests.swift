@@ -15,9 +15,19 @@ import Foundation
             == "See the docs today.")
 }
 
-@Test func stripsListBullets() {
+/// The bullet goes; the fact that these were two separate items does not.
+///
+/// This used to expect "first second", which is the defect rather than the behaviour: two
+/// list items spoken as one phrase, with no pause between them. The marker is the only
+/// evidence a line was a standalone item, so an unterminated item is terminated while the
+/// marker is still there to prove it was one.
+@Test func stripsListBulletsButKeepsThemApart() {
     let p = TextPreparer()
-    #expect(p.prepare("- first\n- second") == "first second")
+    #expect(p.prepare("- first\n- second") == "first. second.")
+    #expect(p.prepare("1. first\n2. second") == "first. second.")
+    // An item that punctuates itself is left exactly as it is.
+    #expect(p.prepare("- first.\n- second?") == "first. second?")
+    #expect(p.prepare("- ends in a colon:\n- next") == "ends in a colon: next.")
 }
 
 @Test func stripsCitationBrackets() {

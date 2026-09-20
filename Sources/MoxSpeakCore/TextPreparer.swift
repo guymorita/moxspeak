@@ -29,7 +29,16 @@ public struct TextPreparer: Sendable {
     }
 
     public func prepare(_ raw: String) -> String {
-        var text = raw
+        // Line endings first, before anything reasons about lines.
+        //
+        // Windows, most web forms and plenty of copied documents send CRLF, and a lone
+        // CR still turns up from very old Mac files. Every line-anchored rule below, and
+        // the whole of `collapseNewlines`, is written against "\n" — and a stray "\r"
+        // does not merely survive, it hides: a blank line arriving as "\r" is not empty,
+        // so paragraph breaks quietly stop being breaks and the text is read as one
+        // sentence. One substitution here, or that bug in every rule separately.
+        var text = raw.replacingOccurrences(of: "\r\n", with: "\n")
+                      .replacingOccurrences(of: "\r", with: "\n")
 
         // Order matters. Code fences are removed before markdown inline syntax so
         // their contents cannot be mangled on the way out.
@@ -81,15 +90,84 @@ public struct TextPreparer: Sendable {
         text.replacing(/(\w)-\n[ \t]*(\w)/) { m in "\(m.1)\(m.2)" }
     }
 
-    /// Blank-line paragraph breaks and single soft-wrap newlines both become a
-    /// single space.
+    /// Turns line breaks into either a space or a sentence boundary, depending on which
+    /// one the break actually was.
+    ///
+    /// ## The bug this replaces
+    ///
+    /// Every newline used to become a space. That is right for a soft wrap and wrong for
+    /// everything else, and web pages are mostly everything else. A heading above a
+    /// paragraph, a stack of short marketing lines, a list: all of them ran together into
+    /// one breathless sentence, because a line with no full stop at the end of it got
+    /// joined to the next line with nothing but a space.
+    ///
+    ///     For Developers
+    ///
+    ///     Start with code.
+    ///
+    /// became "For Developers Start with code." — spoken as a single clause, with the
+    /// heading swallowed into the sentence after it. Kokoro cannot put a pause where the
+    /// text does not ask for one.
+    ///
+    /// ## Telling a break from a wrap
+    ///
+    /// The hard part is that a soft wrap looks identical at the end of the line: both
+    /// stop without punctuation. The difference is in what comes next.
+    ///
+    /// - **A blank line** is always a real break. Nothing wraps across a blank line.
+    /// - **A single newline** is a wrap only if the next line continues the sentence,
+    ///   and a line that continues a sentence starts in lower case. A next line that
+    ///   starts with a capital, a digit or a quote is a new thought: the next heading,
+    ///   the next bullet, the next row.
+    ///
+    /// Getting this backwards in the other direction would be worse than the bug, so the
+    /// wrap case is the one that gets the benefit of the doubt: lower case continues,
+    /// everything else breaks.
     private func collapseNewlines(_ text: String) -> String {
-        var out = text
-        // Blank line means paragraph break: becomes a space, sentence punctuation stays.
-        out = out.replacing(/\n[ \t]*\n[\s]*/, with: " ")
-        // A single newline inside a paragraph is a soft wrap.
-        out = out.replacing(/\n[ \t]*/, with: " ")
-        return out
+        var result = ""
+        var sawBlankLine = false
+
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let content = line.trimmingCharacters(in: .whitespaces)
+            if content.isEmpty {
+                // Remember it and move on. A run of blank lines is one break, and a
+                // trailing one must not append a stray full stop to the document.
+                if !result.isEmpty { sawBlankLine = true }
+                continue
+            }
+            if result.isEmpty {
+                result = content
+            } else {
+                // A blank line is always a real break; nothing wraps across one. Without
+                // a blank line, this is a wrap only if the line carries the sentence on,
+                // and a line that does so starts in lower case. A capital, a digit or a
+                // quote means a new thought: the next heading, bullet or row.
+                let continuesSentence = !sawBlankLine
+                    && content.first?.isLowercase == true
+                result += Self.separator(after: result, breaking: !continuesSentence)
+                result += content
+            }
+            sawBlankLine = false
+        }
+        return result
+    }
+
+    /// What goes between two lines: a space when the first was soft-wrapped, and the
+    /// full stop that makes it a sentence of its own when the break was real and the line
+    /// did not already end in something a speaker would pause on.
+    private static func separator(after line: String, breaking: Bool) -> String {
+        guard breaking else { return " " }
+
+        // Closing quotes and brackets sit outside the punctuation they close, so
+        // `He said "stop."` is plainly already terminated.
+        var tail = Substring(line)
+        while let last = tail.last, "\"'\u{2019}\u{201D})]}\u{BB}".contains(last) {
+            tail = tail.dropLast()
+        }
+        // `:` and `;` earn a pause of their own, and a dash ends a deliberately trailing
+        // line. A full stop after any of them would read as a stutter.
+        if let last = tail.last, ".!?\u{2026}:;\u{2014}-".contains(last) { return " " }
+        return ". "
     }
 
     private func stripMarkdown(_ text: String) -> String {
@@ -101,7 +179,18 @@ public struct TextPreparer: Sendable {
         // Blockquote markers at line start.
         out = out.replacing(/(?m)^[ \t]*>[ \t]?/, with: "")
         // List bullets and ordered markers at line start.
-        out = out.replacing(/(?m)^[ \t]*(?:[-*+]|\d+\.)[ \t]+/, with: "")
+        //
+        // The marker is also the only surviving evidence that the line is a standalone
+        // item, so an item that does not end in punctuation is terminated here, while the
+        // bullet is still there to prove it was one. Once the marker is gone the line is
+        // indistinguishable from a wrapped fragment, and `collapseNewlines` has to guess
+        // from the next line's first letter — which reads "macOS 14 or later" as a
+        // continuation, because "macOS" begins in lower case.
+        out = out.replacing(/(?m)^[ \t]*(?:[-*+]|\d+\.)[ \t]+([^\n]*)/) { m in
+            let item = String(m.1).trimmingCharacters(in: .whitespaces)
+            guard let last = item.last else { return item }
+            return ".!?\u{2026}:;".contains(last) ? item : item + "."
+        }
         // Horizontal rules.
         out = out.replacing(/(?m)^[ \t]*(?:---+|\*\*\*+|___+)[ \t]*$/, with: " ")
         // Inline code.
