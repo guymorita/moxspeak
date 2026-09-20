@@ -109,9 +109,11 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
         let title = label("MoxSpeak", font: .systemFont(ofSize: 22, weight: .semibold))
         title.alignment = .center
 
+        let hint = MenuBarHintView()
+
         let whereItIs = label(
-            "MoxSpeak lives in your menu bar, up there. It has no window and no "
-            + "Dock icon — that's normal.",
+            "Look for this icon at the top of your screen. MoxSpeak has no window and "
+            + "no Dock icon. That is normal.",
             font: .systemFont(ofSize: 13), secondary: true)
         whereItIs.alignment = .center
 
@@ -160,7 +162,7 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
         privacy.alignment = .center
 
         let stack = NSStackView(views: [
-            icon, title, whereItIs,
+            icon, title, hint, whereItIs,
             separator(), howTo, key, keyWords, separator(),
             button, note, login, start, privacy,
         ])
@@ -168,6 +170,8 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
         stack.alignment = .centerX
         stack.spacing = 10
         stack.setCustomSpacing(4, after: icon)
+        stack.setCustomSpacing(12, after: title)
+        stack.setCustomSpacing(8, after: hint)
         stack.setCustomSpacing(14, after: whereItIs)
         stack.setCustomSpacing(2, after: howTo)
         stack.setCustomSpacing(1, after: key)
@@ -175,7 +179,7 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
         stack.setCustomSpacing(6, after: button)
         stack.setCustomSpacing(18, after: note)
         stack.setCustomSpacing(18, after: login)
-        stack.edgeInsets = NSEdgeInsets(top: 26, left: 30, bottom: 20, right: 30)
+        stack.edgeInsets = NSEdgeInsets(top: 24, left: 30, bottom: 20, right: 30)
         stack.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(stack)
         NSLayoutConstraint.activate([

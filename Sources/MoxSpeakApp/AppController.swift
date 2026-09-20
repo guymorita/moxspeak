@@ -110,6 +110,14 @@ final class AppController {
             enableSelectToSpeak: { [weak self] in self?.enableSelectToSpeak() },
             openShortcuts: { [weak self] in self?.openShortcuts() },
             reset: { [weak self] in self?.resetEverything() },
+            isLaunchAtLoginEnabled: { LaunchAtLogin.isEnabled },
+            setLaunchAtLoginEnabled: { [weak self] on in
+                let settled = LaunchAtLogin.set(on)
+                if !settled {
+                    self?.menuBar?.flash("Allow MoxSpeak in System Settings, Login Items",
+                                         seconds: 5)
+                }
+            },
             isTelemetryEnabled: { [weak self] in self?.settings.isTelemetryEnabled ?? true },
             setTelemetryEnabled: { [weak self] on in
                 guard let self else { return }
@@ -256,7 +264,7 @@ final class AppController {
         // presses it, nothing happens, and there is no way to tell a taken shortcut from
         // a broken app. So it goes in the menu permanently *and* announces itself once.
         hotkeyWarning = problems.joined(separator: "; ")
-        menuBar?.flash("Hotkey unavailable — see menu", seconds: 4)
+        menuBar?.flash("Hotkey unavailable. See the menu.", seconds: 4)
         AppLog.write("hotkey: \(hotkeyWarning ?? "")")
     }
 
@@ -387,7 +395,7 @@ final class AppController {
         health = EngineHealth(slowThreshold: choice.slowThreshold, slowHint: choice.slowHint)
         engineWarning = nil
         lastError = nil
-        idleNote = wasPlaying ? "Stopped — switched to \(choice.shortName)" : "Ready"
+        idleNote = wasPlaying ? "Stopped. Switched to \(choice.shortName)." : "Ready"
 
         menuBar?.setSelectedEngine(choice)
         menuBar?.setVoices([], selected: voice, note: "Loading voices…")
@@ -426,7 +434,7 @@ final class AppController {
             if error is DecodingError {
                 health.markReachable()
                 menuBar?.setVoices([], selected: voice,
-                                   note: "Voice list unreadable — using \(voice)")
+                                   note: "Voice list unreadable. Using \(voice).")
             } else {
                 health.markUnreachable(choice.unreachableReason(port: port))
                 menuBar?.setVoices([], selected: voice, note: choice.voiceListUnavailableNote)
@@ -467,7 +475,7 @@ final class AppController {
                          + "\(available.count) voices the \(engine.logName) engine offers "
                          + "— speaking as \(resolved) this session; \(stored) stays saved "
                          + "and returns on an engine that has it")
-            menuBar?.flash("\(stored) isn't on this engine — using \(resolved)", seconds: 5)
+            menuBar?.flash("\(stored) isn't on this engine. Using \(resolved).", seconds: 5)
         } else if previous != stored {
             AppLog.write("settings: stored voice \(stored) is available on the "
                          + "\(engine.logName) engine — restored")
@@ -567,7 +575,7 @@ final class AppController {
         menuBar?.setSelectToSpeak(active: SelectionReader.isTrusted)
         guard let text = SelectionReader.clipboardText() else {
             menuBar?.flash("Clipboard is empty")
-            idleNote = "Nothing to speak — the clipboard holds no text"
+            idleNote = "Nothing to speak. The clipboard holds no text."
             lastError = nil
             refresh()
             AppLog.write("speak: source=clipboard (tier 3, menu) — the clipboard holds no text")
@@ -593,7 +601,7 @@ final class AppController {
             // Non-modal, self-clearing, and it says which of the things happened —
             // nothing selected, a selection that is not text, or no clipboard at all.
             menuBar?.flash(reading.flash)
-            idleNote = "Nothing to speak — \(reading.note)"
+            idleNote = "Nothing to speak. \(reading.note)"
             lastError = nil
             refresh()
             AppLog.write("speak: nothing to say from \(appLabel) — \(reading.note)")
@@ -899,7 +907,7 @@ final class AppController {
 
         if failures.isEmpty {
             if chunkCount == 0 {
-                idleNote = "Nothing to speak — that text had no readable words"
+                idleNote = "Nothing to speak. That text had no readable words."
             } else {
                 idleNote = "Finished \(chunkCount) chunk\(chunkCount == 1 ? "" : "s")"
             }

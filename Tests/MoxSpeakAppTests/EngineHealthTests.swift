@@ -187,7 +187,7 @@ import Foundation
 @Test func theSlowSummaryNamesTheNumberAndTheOneUsefulAction() {
     var health = EngineHealth(slowThreshold: 2.5)
     health.record(timeToFirstSound: 3.24)
-    #expect(health.summary == "Voice engine is slow (3.2s) — restarting it may help")
+    #expect(health.summary == "Voice engine is slow (3.2s). Restarting it may help.")
 }
 
 @Test func theHealthySummaryNamesTheNumberToo() {

@@ -83,7 +83,7 @@ struct Hotkey: Equatable, Hashable, Sendable {
             case .noModifiers:
                 return "a shortcut needs Control or Command"
             case .onlyOptionOrShift:
-                return "macOS ignores Option/Shift-only shortcuts — add Control or Command"
+                return "macOS ignores Option/Shift-only shortcuts. Add Control or Command."
             }
         }
 

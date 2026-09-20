@@ -36,6 +36,10 @@ final class MenuBarController: NSObject {
         /// Erase the two things MoxSpeak leaves outside its own bundle. Destructive, and
         /// confirmed by the controller before anything is touched — see `Reset`.
         var reset: @MainActor () -> Void
+        /// Whether MoxSpeak is set to open at login right now.
+        var isLaunchAtLoginEnabled: @MainActor () -> Bool
+        /// Turn the login item on or off.
+        var setLaunchAtLoginEnabled: @MainActor (Bool) -> Void
         /// Whether anonymous usage reporting is on right now.
         var isTelemetryEnabled: @MainActor () -> Bool
         /// Turn anonymous usage reporting on or off.
@@ -93,6 +97,7 @@ final class MenuBarController: NSObject {
     private let selectToSpeakItem = NSMenuItem()
     private let resetItem = NSMenuItem()
     private let telemetryItem = NSMenuItem()
+    private let loginItem = NSMenuItem()
     private let versionItem = NSMenuItem()
 
     /// Guards the transient flash message: a later flash must not be wiped by an earlier
@@ -216,6 +221,16 @@ final class MenuBarController: NSObject {
         advanced.addItem(engineItem)
         advanced.addItem(.separator())
 
+        // Offered on the welcome window too, but that is shown once and never again.
+        // Somebody who unticked it there, or who changes their mind after a reboot, needs
+        // a way back, and this is the only place a setting like it can live.
+        loginItem.title = "Open MoxSpeak at login"
+        loginItem.toolTip = "Start MoxSpeak automatically when you log in."
+        loginItem.action = #selector(toggleLaunchAtLogin)
+        loginItem.target = self
+        loginItem.isEnabled = true
+        advanced.addItem(loginItem)
+
         telemetryItem.title = "Send anonymous usage stats"
         telemetryItem.toolTip = "Crash reports and a short list of usage events. No text "
                               + "you select or copy is ever included."
@@ -223,6 +238,7 @@ final class MenuBarController: NSObject {
         telemetryItem.target = self
         telemetryItem.isEnabled = true
         advanced.addItem(telemetryItem)
+        refreshAdvancedState()
 
         let privacy = NSMenuItem(title: "Privacy…", action: #selector(openPrivacy),
                                  keyEquivalent: "")
@@ -562,15 +578,27 @@ final class MenuBarController: NSObject {
 
     @objc private func toggleTelemetry() {
         actions.setTelemetryEnabled(!actions.isTelemetryEnabled())
-        refreshTelemetryItem()
+        refreshAdvancedState()
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        actions.setLaunchAtLoginEnabled(!actions.isLaunchAtLoginEnabled())
+        // Read back rather than assume: macOS can refuse a login item when the user has
+        // disabled it in System Settings, and a tick that showed what we asked for rather
+        // than what happened would be a lie the user acts on.
+        refreshAdvancedState()
     }
 
     @objc private func openPrivacy() { actions.openPrivacy() }
 
-    /// The tick reflects what is actually stored, re-read each time the menu opens rather
-    /// than remembered, so it cannot drift from the setting it claims to show.
-    private func refreshTelemetryItem() {
+    /// Both ticks reflect what is actually in force, re-read each time the menu opens
+    /// rather than remembered, so neither can drift from the setting it claims to show.
+    /// The login item in particular can be switched off in System Settings behind the
+    /// app's back.
+    private func refreshAdvancedState() {
         telemetryItem.state = actions.isTelemetryEnabled() ? .on : .off
+        loginItem.state = actions.isLaunchAtLoginEnabled() ? .on : .off
+        loginItem.isHidden = !LaunchAtLogin.isAvailable
     }
     @objc private func quit() { actions.quit() }
 
@@ -595,5 +623,9 @@ extension MenuBarController: NSMenuDelegate {
     /// is cheap and is the only way the item can be right.
     func menuWillOpen(_ menu: NSMenu) {
         actions.menuWillOpen()
+        // Re-read rather than remember. A tick has to show what is actually in force:
+        // without this the items render unchecked forever and read as buttons rather
+        // than as the switches they are.
+        refreshAdvancedState()
     }
 }
