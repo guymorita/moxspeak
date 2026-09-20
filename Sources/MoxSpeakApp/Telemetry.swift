@@ -63,6 +63,14 @@ enum Telemetry {
 
         SentrySDK.start { options in
             options.dsn = dsn
+            // Off by default and never shipped on: Sentry's own debug output is verbose
+            // and goes to stdout, which an LSUIElement app has nowhere useful to put. It
+            // exists because "is anything actually being sent" is otherwise unanswerable
+            // from outside — the SDK swallows transport failures by design, so a wrong
+            // DSN, a proxy, or a feature that silently never flushes all look identical
+            // to a quiet week.
+            //   MOXSPEAK_SENTRY_DEBUG=1 MoxSpeak.app/Contents/MacOS/MoxSpeak
+            options.debug = ProcessInfo.processInfo.environment["MOXSPEAK_SENTRY_DEBUG"] == "1"
             options.releaseName = "moxspeak@\(release)"
             // A dev build reports as such so local crashes never pollute what real users hit.
             let isDevelopment = version.shortVersion == nil || version.isDirty
@@ -95,6 +103,12 @@ enum Telemetry {
         }
 
         isRunning = true
+        // A menu bar app is usually quit rather than closed, and the SDK batches. Without
+        // an explicit flush at exit, the last session's events can die with the process.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { _ in SentrySDK.flush(timeout: 2) }
+
         AppLog.write("telemetry: on — anonymous id \(installID.prefix(8))…, "
                      + "crash reports and \(TelemetryEvent.allCases.count) usage events")
     }
@@ -126,6 +140,40 @@ enum Telemetry {
         guard isRunning else { return }
         SentrySDK.logger.info(event.rawValue,
                               attributes: TelemetryPayload.sanitize(attributes))
+    }
+
+    /// Proves the whole path end to end: start, record, flush, and say what happened.
+    ///
+    /// Exists because "is telemetry actually working" was unanswerable for an afternoon.
+    /// The SDK is built to fail quietly — a wrong DSN, a proxy, a feature that never
+    /// flushes, and a genuinely quiet week all look identical from the outside — so the
+    /// only honest way to know is to send something on purpose and wait for the answer.
+    ///
+    ///     MOXSPEAK_TELEMETRY_TEST=1 MoxSpeak.app/Contents/MacOS/MoxSpeak
+    static func runSelfTestIfAsked(settings: Settings) {
+        guard ProcessInfo.processInfo.environment["MOXSPEAK_TELEMETRY_TEST"] == "1"
+        else { return }
+
+        print("telemetry self-test: running=\(isRunning), enabled=\(settings.isTelemetryEnabled)")
+        guard isRunning else {
+            print("telemetry self-test: SDK not started, nothing to test")
+            exit(1)
+        }
+
+        // A message rather than a log line: messages take the event pipeline, which is
+        // the one crash reports use and the one the debug transport narrates.
+        let id = SentrySDK.capture(message: "moxspeak telemetry self-test")
+        print("telemetry self-test: captured event \(id)")
+
+        record(.appLaunched, ["app_version": "self-test", "engine": "native"])
+        print("telemetry self-test: recorded a usage event")
+
+        // flush is void and blocks up to the timeout, so the elapsed time is the signal:
+        // a full 10 seconds means nothing drained.
+        let start = Date()
+        SentrySDK.flush(timeout: 10)
+        print(String(format: "telemetry self-test: flush took %.2fs", Date().timeIntervalSince(start)))
+        exit(0)
     }
 
     // MARK: - Scrubbing

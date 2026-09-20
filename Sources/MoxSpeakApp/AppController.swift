@@ -145,6 +145,7 @@ final class AppController {
         nowPlaying.activate()
 
         Telemetry.start(settings: settings)
+        Telemetry.runSelfTestIfAsked(settings: settings)
         checkForUpdateIfDue()
         Telemetry.record(.appLaunched, [
             "engine": engineChoice.rawValue,
