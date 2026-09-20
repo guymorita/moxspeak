@@ -447,3 +447,34 @@ import Testing
                 Comment(rawValue: "\(hotkey.label) spelled out as \(hotkey.spelledOut)"))
     }
 }
+
+/// The shape of a bug that shipped: every successful shortcut change told the user
+/// "MoxSpeak is shutting down".
+///
+/// `rebind` returns `String?`, where nil means it worked and a string is what went wrong.
+/// The call site was `self?.rebind(...) ?? "MoxSpeak is shutting down"`, meaning to supply
+/// that message only when the controller had gone away. But optional chaining does not
+/// add a level of optionality to something already optional — `self?.method()` where the
+/// method returns `String?` is `String?`, flattened — so the `??` could not tell a missing
+/// receiver from a successful nil, and fired on every success.
+///
+/// Kept as a test because the expression reads as obviously correct, which is exactly why
+/// it survived review.
+@Test func optionalChainingCannotTellAMissingSelfFromANilResult() {
+    final class Receiver { func rebind() -> String? { nil } }
+
+    let present: Receiver? = Receiver()
+    let absent: Receiver? = nil
+
+    // The bug. A live receiver reporting success is indistinguishable from no receiver.
+    #expect((present?.rebind() ?? "shutting down") == "shutting down")
+    #expect((absent?.rebind() ?? "shutting down") == "shutting down")
+
+    // The fix: unwrap the receiver first, then return its answer untouched.
+    func resolved(_ receiver: Receiver?) -> String? {
+        guard let receiver else { return "shutting down" }
+        return receiver.rebind()
+    }
+    #expect(resolved(present) == nil, "success must report no problem")
+    #expect(resolved(absent) == "shutting down")
+}

@@ -323,7 +323,16 @@ final class AppController {
         let window = shortcuts ?? ShortcutsWindowController(actions: .init(
             current: { [weak self] in self?.hotkeyBindings ?? [:] },
             rebind: { [weak self] action, hotkey in
-                self?.rebind(action, to: hotkey) ?? "MoxSpeak is shutting down"
+                // `guard let self`, not `self?.rebind(...) ?? message`.
+                //
+                // Optional chaining does not add a level of optionality to something that
+                // is already optional: `self?.rebind(...)` where rebind returns `String?`
+                // is `String?`, flattened, not `String??`. So `?? message` could not tell
+                // "the controller is gone" from "the rebind succeeded" — and rebind
+                // returns nil precisely on success. Every successful shortcut change
+                // reported "MoxSpeak is shutting down".
+                guard let self else { return "MoxSpeak is shutting down" }
+                return self.rebind(action, to: hotkey)
             },
             restoreDefaults: { [weak self] in self?.restoreDefaultHotkeys() ?? [:] }
         ))

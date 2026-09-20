@@ -50,10 +50,14 @@ sample "technical" \
 "The API returns a 429 when you exceed 60 requests per hour. Back off exponentially, \
 starting at 2 seconds, and read the X-RateLimit-Reset header rather than guessing."
 
+# Deliberately free of heteronyms. The previous passage opened "She had read the letter",
+# and Kokoro said it /riːd/ — present tense — because the pronunciation of "read" depends
+# on a part-of-speech call that the G2P front end gets wrong here. Fine to have as a known
+# bug; not fine to have as the sample people judge the voice by.
 sample "fiction" \
-"She had read the letter four times before she noticed the postmark. It had been sent \
-from a town she had not thought about in eleven years, by someone who was supposed to \
-be dead."
+"The lighthouse keeper's daughter kept a list of every ship that passed. On the morning \
+of the storm she counted nine going out and only eight coming back, and she never told \
+anyone which one was missing."
 
 echo
 echo "Done. ${OUT}/"
