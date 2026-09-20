@@ -63,7 +63,7 @@ struct EngineHealth: Sendable {
 
     init(windowSize: Int = 8,
          slowThreshold: TimeInterval = 2.5,
-         slowHint: String = "restarting it may help") {
+         slowHint: String = "Restarting it may help.") {
         // A zero or negative window would make `record` a no-op and the status
         // permanently `.unknown` — health reporting that silently reports nothing is
         // worse than none, so the window is floored at one sample.
@@ -141,11 +141,11 @@ struct EngineHealth: Sendable {
         case .unknown:
             return "Voice engine: not measured yet"
         case .unreachable(let reason):
-            return "Voice engine is unreachable — \(reason)"
+            return "Voice engine is unreachable. \(reason)"
         case .healthy(let median):
             return "Voice engine is responsive (\(Self.format(median)))"
         case .slow(let median):
-            return "Voice engine is slow (\(Self.format(median))) — \(slowHint)"
+            return "Voice engine is slow (\(Self.format(median))). \(slowHint)"
         }
     }
 

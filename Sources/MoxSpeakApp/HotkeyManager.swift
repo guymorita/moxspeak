@@ -93,7 +93,7 @@ final class HotkeyManager {
         var description: String {
             switch self {
             case .unusable(let hotkey, let reason):
-                return "\(hotkey.label) cannot work — \(reason)"
+                return "\(hotkey.label) cannot work. \(reason)"
             case .alreadyTaken(let hotkey, let status):
                 return "\(hotkey.label) is already taken by another app (OSStatus \(status))"
             case .clashesWithOurOwn(let hotkey, let other):

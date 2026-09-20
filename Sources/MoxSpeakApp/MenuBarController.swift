@@ -36,6 +36,18 @@ final class MenuBarController: NSObject {
         /// Erase the two things MoxSpeak leaves outside its own bundle. Destructive, and
         /// confirmed by the controller before anything is touched — see `Reset`.
         var reset: @MainActor () -> Void
+        /// Open the page where a newer version can be downloaded.
+        var openDownloadPage: @MainActor () -> Void
+        /// Whether MoxSpeak is set to open at login right now.
+        var isLaunchAtLoginEnabled: @MainActor () -> Bool
+        /// Turn the login item on or off.
+        var setLaunchAtLoginEnabled: @MainActor (Bool) -> Void
+        /// Whether anonymous usage reporting is on right now.
+        var isTelemetryEnabled: @MainActor () -> Bool
+        /// Turn anonymous usage reporting on or off.
+        var setTelemetryEnabled: @MainActor (Bool) -> Void
+        /// Open the page describing exactly what is and is not collected.
+        var openPrivacy: @MainActor () -> Void
         /// Fired every time the menu is about to appear. The controller uses it to
         /// re-read state that can change behind the app's back — Accessibility, which
         /// the user can grant or revoke in System Settings at any moment.
@@ -86,6 +98,9 @@ final class MenuBarController: NSObject {
     private let shortcutsItem = NSMenuItem()
     private let selectToSpeakItem = NSMenuItem()
     private let resetItem = NSMenuItem()
+    private let telemetryItem = NSMenuItem()
+    private let updateItem = NSMenuItem()
+    private let loginItem = NSMenuItem()
     private let versionItem = NSMenuItem()
 
     /// Guards the transient flash message: a later flash must not be wiped by an earlier
@@ -168,13 +183,6 @@ final class MenuBarController: NSObject {
         rateItem.isEnabled = true
         menu.addItem(rateItem)
 
-        // Beside Voice and Speed, because it is the same kind of thing: a preference the
-        // user owns, that persists, and that takes effect immediately. Filled in by
-        // `setEngines` before the menu is ever shown.
-        engineChoiceItem.title = "Engine"
-        engineChoiceItem.submenu = NSMenu()
-        menu.addItem(engineChoiceItem)
-
         // Beside the other three preferences, and a plain `NSMenuItem` like them: no
         // custom view, so AppKit supplies the same text inset it gives "Voice" and
         // "Engine" and this row needs no measuring to line up. The ellipsis says a window
@@ -194,24 +202,78 @@ final class MenuBarController: NSObject {
         menu.addItem(selectToSpeakItem)
         setSelectToSpeak(active: false)
 
+        // Hidden unless there is actually a newer release. An update row that is always
+        // present, greyed out and saying "up to date", is a permanent piece of furniture
+        // earning nothing; one that appears only when it has news is worth looking at.
+        updateItem.action = #selector(openDownloadPage)
+        updateItem.target = self
+        updateItem.isEnabled = true
+        updateItem.isHidden = true
+        menu.addItem(updateItem)
+
         menu.addItem(.separator())
 
-        engineItem.title = "Voice engine: not measured yet"
+        // Everything here is real, reachable and rarely wanted, which is exactly what a
+        // submenu is for. The telemetry switch in particular is deliberately not a
+        // top-level row: presenting it as a headline choice would tell every user that
+        // this is a decision they need to make before using a text-to-speech app, which
+        // overstates it. It is disclosed on the welcome window, it is one click from
+        // here, and Privacy… says precisely what is collected.
+        //
+        // Reset moves in here too. It is destructive and almost never wanted, and it was
+        // sitting next to Quit where a slip costs somebody their settings.
+        let advanced = NSMenu()
+        advanced.autoenablesItems = false
+
+        // A diagnostic, not a preference, and phrased for whoever is helping rather than
+        // for the person using the app. It was on the top level reading "Voice engine:
+        // not measured yet", which to a new user looks like a warning about something
+        // they have done wrong.
         engineItem.isEnabled = false
-        menu.addItem(engineItem)
+        advanced.addItem(engineItem)
+        advanced.addItem(.separator())
 
-        menu.addItem(.separator())
+        // Offered on the welcome window too, but that is shown once and never again.
+        // Somebody who unticked it there, or who changes their mind after a reboot, needs
+        // a way back, and this is the only place a setting like it can live.
+        loginItem.title = "Open MoxSpeak at login"
+        loginItem.toolTip = "Start MoxSpeak automatically when you log in."
+        loginItem.action = #selector(toggleLaunchAtLogin)
+        loginItem.target = self
+        loginItem.isEnabled = true
+        advanced.addItem(loginItem)
 
-        // Beside Quit, because it belongs to the same moment: the user is finished with
-        // MoxSpeak. No key equivalent — a destructive item is not something to arrive at
-        // by muscle memory, and the ellipsis promises the confirmation that `Reset`
-        // requires.
+        telemetryItem.title = "Send anonymous usage stats"
+        telemetryItem.toolTip = "Crash reports and a short list of usage events. No text "
+                              + "you select or copy is ever included."
+        telemetryItem.action = #selector(toggleTelemetry)
+        telemetryItem.target = self
+        telemetryItem.isEnabled = true
+        advanced.addItem(telemetryItem)
+        refreshAdvancedState()
+
+        let privacy = NSMenuItem(title: "Privacy…", action: #selector(openPrivacy),
+                                 keyEquivalent: "")
+        privacy.toolTip = "Exactly what is and is not sent."
+        privacy.target = self
+        privacy.isEnabled = true
+        advanced.addItem(privacy)
+
+        advanced.addItem(.separator())
+
+        // No key equivalent — a destructive item is not something to arrive at by muscle
+        // memory, and the ellipsis promises the confirmation that `Reset` requires.
         resetItem.title = Reset.menuTitle
         resetItem.toolTip = Reset.menuDetail
         resetItem.action = #selector(reset)
         resetItem.target = self
         resetItem.isEnabled = true
-        menu.addItem(resetItem)
+        advanced.addItem(resetItem)
+
+        let advancedItem = NSMenuItem(title: "Advanced", action: nil, keyEquivalent: "")
+        advancedItem.submenu = advanced
+        advancedItem.isEnabled = true
+        menu.addItem(advancedItem)
 
         // Quiet and informational, in the style of `engineItem` above: a plain
         // `NSMenuItem`, disabled so it reads as text rather than a control, with nothing
@@ -404,10 +466,21 @@ final class MenuBarController: NSObject {
 
     /// Replaces the engine submenu and names the current choice in the parent row.
     ///
-    /// The parent says "Engine: Built in" rather than plain "Engine" so the answer is
-    /// visible without opening a submenu. Which engine is speaking changes what the app
-    /// depends on — a running server or nothing at all — and that is not something the
-    /// user should have to go looking for.
+    /// **Not in the menu.** The picker is built and kept current, but nothing adds
+    /// `engineChoiceItem` to the menu any more.
+    ///
+    /// MoxSpeak ships one engine. A picker with one real option is a promise that has not
+    /// been made, and the other option is worse than useless to the people this is for:
+    /// choosing "Kokoro server" points the app at an HTTP server that is not running, so
+    /// the setting's wrong answer is silent failure. "Built in" communicates nothing to
+    /// somebody who does not know there is an alternative — the row's whole information
+    /// content was "there is a concept here you should worry about", which is false.
+    ///
+    /// The seam stays. `SpeechProvider`, `OpenAICompatibleProvider` and this picker are
+    /// what make a second engine cheap when there is a second engine; they simply stop
+    /// being a user-facing concept until then. `defaults write com.moxspeak.menubar
+    /// engine http` still selects it, which is the right amount of support for the one
+    /// person in a thousand pointing this at their own server.
     func setEngines(_ choices: [EngineChoice], selected: EngineChoice, port: Int) {
         let submenu = NSMenu()
         submenu.autoenablesItems = false
@@ -514,6 +587,45 @@ final class MenuBarController: NSObject {
     @objc private func togglePause() { actions.togglePause() }
     @objc private func stop() { actions.stop() }
     @objc private func reset() { actions.reset() }
+
+    @objc private func toggleTelemetry() {
+        actions.setTelemetryEnabled(!actions.isTelemetryEnabled())
+        refreshAdvancedState()
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        actions.setLaunchAtLoginEnabled(!actions.isLaunchAtLoginEnabled())
+        // Read back rather than assume: macOS can refuse a login item when the user has
+        // disabled it in System Settings, and a tick that showed what we asked for rather
+        // than what happened would be a lie the user acts on.
+        refreshAdvancedState()
+    }
+
+    @objc private func openPrivacy() { actions.openPrivacy() }
+
+    @objc private func openDownloadPage() { actions.openDownloadPage() }
+
+    /// Shows or hides the update row. Nil hides it, which is also how it starts, so a
+    /// failed or skipped check leaves the menu exactly as it was.
+    func setUpdateAvailable(_ version: String?) {
+        guard let version else {
+            updateItem.isHidden = true
+            return
+        }
+        updateItem.title = "Update to \(version)"
+        updateItem.toolTip = "Opens the download page. MoxSpeak does not update itself."
+        updateItem.isHidden = false
+    }
+
+    /// Both ticks reflect what is actually in force, re-read each time the menu opens
+    /// rather than remembered, so neither can drift from the setting it claims to show.
+    /// The login item in particular can be switched off in System Settings behind the
+    /// app's back.
+    private func refreshAdvancedState() {
+        telemetryItem.state = actions.isTelemetryEnabled() ? .on : .off
+        loginItem.state = actions.isLaunchAtLoginEnabled() ? .on : .off
+        loginItem.isHidden = !LaunchAtLogin.isAvailable
+    }
     @objc private func quit() { actions.quit() }
 
     @objc private func selectVoice(_ sender: NSMenuItem) {
@@ -537,5 +649,9 @@ extension MenuBarController: NSMenuDelegate {
     /// is cheap and is the only way the item can be right.
     func menuWillOpen(_ menu: NSMenu) {
         actions.menuWillOpen()
+        // Re-read rather than remember. A tick has to show what is actually in force:
+        // without this the items render unchecked forever and read as buttons rather
+        // than as the switches they are.
+        refreshAdvancedState()
     }
 }

@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoxSpeak</title>
+<meta name="description" content="Select text anywhere on your Mac, press Control+Option+S, and hear it read aloud in a good voice. Runs entirely on your machine.">
+<link rel="icon" href="icon.png">
+<meta property="og:title" content="MoxSpeak">
+<meta property="og:description" content="Select text anywhere on your Mac, press Control+Option+S, and hear it. No server, no account, no network.">
+<meta property="og:image" content="https://guymorita.github.io/moxspeak/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ink:       #10151c;
+    --ink-soft:  #4a5666;
+    --ink-faint: #7b8798;
+    --ground:    #f7f9fb;
+    --panel:     #ffffff;
+    --edge:      #dfe6ee;
+    --gem:       #2f6fd0;
+    --gem-deep:  #1b4a95;
+    --gem-wash:  #dcebfb;
+    --display: "Fraunces", Georgia, "Times New Roman", serif;
+    --body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink:       #eef3f9;
+      --ink-soft:  #a9b6c6;
+      --ink-faint: #768394;
+      --ground:    #0c1015;
+      --panel:     #151b23;
+      --edge:      #26303c;
+      --gem:       #6aa6f2;
+      --gem-deep:  #9cc4f8;
+      --gem-wash:  #16233a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink:       #eef3f9;
+    --ink-soft:  #a9b6c6;
+    --ink-faint: #768394;
+    --ground:    #0c1015;
+    --panel:     #151b23;
+    --edge:      #26303c;
+    --gem:       #6aa6f2;
+    --gem-deep:  #9cc4f8;
+    --gem-wash:  #16233a;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--gem); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  a:focus-visible { outline: 2px solid var(--gem); outline-offset: 3px; border-radius: 3px; }
+
+  /* ---- hero ---- */
+  header { padding: 72px 0 44px; text-align: center; }
+  header img { width: 104px; height: 104px; }
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(2.6rem, 7vw, 3.6rem);
+    letter-spacing: -0.02em;
+    margin: 18px 0 10px;
+    text-wrap: balance;
+  }
+  .tagline {
+    font-size: clamp(1.05rem, 2.6vw, 1.3rem);
+    color: var(--ink-soft);
+    margin: 0 auto 6px;
+    max-width: 30ch;
+    text-wrap: balance;
+  }
+  .sub { color: var(--ink-faint); font-size: 0.95rem; margin: 0 auto; max-width: 40ch; }
+
+  .cta { margin: 30px 0 10px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .download {
+    display: inline-block;
+    background: var(--gem);
+    color: #fff;
+    font-weight: 600;
+    font-size: 1.05rem;
+    padding: 14px 32px;
+    border-radius: 11px;
+    border: 1px solid var(--gem-deep);
+  }
+  .download:hover { text-decoration: none; filter: brightness(1.07); }
+  .reqs { font-size: 0.86rem; color: var(--ink-faint); }
+  /* Deliberately quiet. The call to action is the download; this is here so the handful
+     of people who would rather type a command know they can, and for nobody else. */
+  .brew { font-size: 0.8rem; color: var(--ink-faint); margin: 2px 0 0; }
+  .brew code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: none;
+    color: var(--ink-faint);
+    padding: 0;
+  }
+
+  /* ---- the one demo: the keystroke ---- */
+  .keys {
+    margin: 52px auto 0;
+    max-width: 440px;
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    padding: 26px 20px 20px;
+    text-align: center;
+  }
+  .keys p { margin: 0 0 14px; color: var(--ink-soft); font-size: 0.95rem; }
+  .combo { display: flex; justify-content: center; align-items: center; gap: 8px; }
+  kbd {
+    font-family: var(--body);
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--ink);
+    background: var(--ground);
+    border: 1px solid var(--edge);
+    border-bottom-width: 2px;
+    border-radius: 7px;
+    padding: 9px 13px;
+    min-width: 44px;
+    display: inline-block;
+  }
+  .plus { color: var(--ink-faint); font-size: 0.9rem; }
+  .keys .said { margin: 14px 0 0; font-size: 0.82rem; color: var(--ink-faint); }
+
+  /* ---- sections ---- */
+  section { padding: 56px 0 0; }
+  h2 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 1.55rem;
+    letter-spacing: -0.01em;
+    margin: 0 0 14px;
+  }
+  p { margin: 0 0 14px; }
+  .lead { color: var(--ink-soft); }
+
+  .facts { display: grid; gap: 1px; background: var(--edge); border: 1px solid var(--edge);
+           border-radius: 12px; overflow: hidden; margin: 22px 0; }
+  @media (min-width: 620px) { .facts { grid-template-columns: repeat(3, 1fr); } }
+  .fact { background: var(--panel); padding: 18px 16px; }
+  .fact .n { font-family: var(--display); font-size: 1.5rem; font-weight: 700;
+             display: block; line-height: 1.2; }
+  .fact .l { font-size: 0.85rem; color: var(--ink-faint); }
+
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.95rem; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--edge); }
+  th { font-weight: 600; font-size: 0.8rem; text-transform: uppercase;
+       letter-spacing: 0.05em; color: var(--ink-faint); }
+  td:first-child { white-space: nowrap; font-weight: 600; }
+
+  #privacy { scroll-margin-top: 20px; }
+  details { border-top: 1px solid var(--edge); padding: 14px 0; }
+  details summary { cursor: pointer; font-weight: 600; list-style: none; }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: "+ "; color: var(--ink-faint); }
+  details[open] summary::before { content: "− "; }
+  details p { margin: 10px 0 0; color: var(--ink-soft); font-size: 0.95rem; }
+
+  footer { margin-top: 64px; padding: 26px 0 50px; border-top: 1px solid var(--edge);
+           font-size: 0.86rem; color: var(--ink-faint); text-align: center; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em;
+         background: var(--gem-wash); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header>
+  <img src="icon.png" alt="MoxSpeak icon: a blue gemstone with sound waves">
+  <h1>MoxSpeak</h1>
+  <p class="tagline">Select text anywhere. Press ⌃⌥S. Hear it.</p>
+  <p class="sub">Works without an internet connection. Nothing to sign up for.</p>
+
+  <div class="cta">
+    <!-- Straight to the file, not to the release page. GitHub's /releases/latest/download/
+         form always redirects to the newest release's asset of that name, so this needs no
+         updating when a version ships. The release page is a developer's page: an average
+         user who lands there has to know to scroll past the notes and find the .dmg. -->
+    <a class="download" href="https://github.com/guymorita/moxspeak/releases/latest/download/MoxSpeak.dmg">Download for macOS</a>
+    <p class="reqs">Free · 170 MB · Apple silicon · macOS 14 or later</p>
+    <p class="brew">or <code>brew install --cask guymorita/tap/moxspeak</code></p>
+  </div>
+
+  <div class="keys">
+    <p>Select any text, anywhere, then press</p>
+    <div class="combo">
+      <kbd>⌃</kbd><span class="plus">+</span><kbd>⌥</kbd><span class="plus">+</span><kbd>S</kbd>
+    </div>
+    <p class="said">Control + Option + S</p>
+  </div>
+</header>
+
+<section>
+  <h2>What it is</h2>
+  <p class="lead">
+    macOS has had text-to-speech for decades, and its voices still sound like
+    text-to-speech. MoxSpeak uses Kokoro, an 82-million-parameter open speech model that
+    is small enough to run in real time on a MacBook Air and, to most ears, sounds better
+    than the premium voices Apple ships.
+  </p>
+  <p class="lead">
+    The whole model is inside the app. There is nothing to sign up for, nothing to start,
+    and nothing that stops working on a plane.
+  </p>
+
+  <div class="facts">
+    <div class="fact"><span class="n">0.3s</span><span class="l">to first sound</span></div>
+    <div class="fact"><span class="n">29</span><span class="l">voices included</span></div>
+    <div class="fact"><span class="n">0</span><span class="l">bytes of your text sent anywhere</span></div>
+  </div>
+</section>
+
+<section>
+  <h2>The shortcuts</h2>
+  <table>
+    <thead><tr><th>Key</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td>⌃⌥S</td><td>Speak the selected text</td></tr>
+      <tr><td>⌃⌥D</td><td>Pause or resume</td></tr>
+      <tr><td>⌃⌥X</td><td>Stop</td></tr>
+    </tbody>
+  </table>
+  <p class="lead">All three are rebindable from the menu, under Keyboard Shortcuts.</p>
+</section>
+
+<section>
+  <h2>Questions</h2>
+
+
+  <details>
+    <summary>Will it run on my Mac?</summary>
+    <p>Apple silicon (M1 or later) and macOS 14 Sonoma or later. Intel Macs cannot run it:
+    the model runs through MLX, which is Apple silicon only.</p>
+  </details>
+
+  <details>
+    <summary>I installed it and nothing happened.</summary>
+    <p>That is expected. MoxSpeak has no window and no Dock icon; it puts a small diamond
+    in your menu bar. If you cannot see it, check whether a menu bar manager such as Ice,
+    Bartender or Hidden Bar has filed it under hidden items, which is where new icons
+    usually land.</p>
+  </details>
+
+  <details>
+    <summary>Why does it need Accessibility permission?</summary>
+    <p>It is the only way on macOS to read the text you have selected in another app.
+    Without it MoxSpeak still works, but it reads whatever you last copied instead, so you
+    have to press ⌘C first.</p>
+  </details>
+
+  <details>
+    <summary>Why is the download 170 MB?</summary>
+    <p>The voice model is inside the app rather than downloaded on first launch. That is
+    what makes it work offline, immediately, with nothing to configure.</p>
+  </details>
+
+  <details>
+    <summary>How do I uninstall it?</summary>
+    <p>Drag it to the Trash. If you want the settings gone too, choose
+    <strong>Advanced → Reset MoxSpeak</strong> first, which clears the preferences and the
+    log.</p>
+  </details>
+
+  <details>
+    <summary>Is it open source?</summary>
+    <p>Source-available. You can read, build, modify and audit it; redistributing it is
+    not permitted. It is public because you should not have to take anyone's word for
+    what an app with Accessibility access does with it.</p>
+  </details>
+  <details id="privacy">
+    <summary>Is what I read private?</summary>
+    <p>Yes. The text you select never leaves your Mac. The voice runs on your own
+    machine, so there is nothing to send anywhere and no company on the other end of it.
+    The same goes for your clipboard, your files, and the names of the apps you use.</p>
+    <p>MoxSpeak does send anonymous crash reports and a count of things like "the app
+    launched" or "speech started", so bugs get fixed without anyone having to write in.
+    That is all it sends, it is not tied to you, and you can switch it off under
+    <strong>Advanced &rarr; Send anonymous usage stats</strong>. The full list is
+    <a href="https://github.com/guymorita/moxspeak/blob/main/Sources/MoxSpeakApp/TelemetryPayload.swift">in the source</a>
+    if you want to check rather than take my word for it.</p>
+  </details>
+</section>
+
+<footer>
+  <p>
+    <a href="https://github.com/guymorita/moxspeak">Source on GitHub</a> ·
+    <a href="https://github.com/guymorita/moxspeak/releases">Releases</a> ·
+    <a href="https://github.com/guymorita/moxspeak/blob/main/LICENSE">Licence</a>
+  </p>
+  <p>Voices from <a href="https://huggingface.co/hexgrad/Kokoro-82M">Kokoro-82M</a>, Apache-2.0.</p>
+</footer>
+
+</div>
+<script>
+  // The app's Advanced menu links straight to #privacy. A <details> cannot be opened by
+  // CSS, so open it here and bring it into view; without this the link lands on a
+  // collapsed row and looks like it did nothing.
+  (function () {
+    function openTarget() {
+      if (location.hash !== "#privacy") return;
+      var el = document.getElementById("privacy");
+      if (!el) return;
+      el.open = true;
+      el.scrollIntoView({ block: "center" });
+    }
+    openTarget();
+    window.addEventListener("hashchange", openTarget);
+  })();
+</script>
+</body>
+</html>

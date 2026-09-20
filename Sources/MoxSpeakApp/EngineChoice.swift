@@ -39,7 +39,7 @@ enum EngineChoice: String, CaseIterable, Sendable {
     /// The submenu row. Says what the choice actually means, not which class implements it.
     func menuTitle(port: Int) -> String {
         switch self {
-        case .native: "Built in — no server needed"
+        case .native: "Built in, no server needed"
         case .http: "Kokoro server on 127.0.0.1:\(port)"
         }
     }
@@ -69,8 +69,8 @@ enum EngineChoice: String, CaseIterable, Sendable {
     /// Shown instead of the voice list when there is no list.
     var voiceListUnavailableNote: String {
         switch self {
-        case .native: "Voice list unavailable — the built-in engine has no voices"
-        case .http: "Voice list unavailable — engine unreachable"
+        case .native: "Voice list unavailable. The built-in engine has no voices."
+        case .http: "Voice list unavailable. Engine unreachable."
         }
     }
 

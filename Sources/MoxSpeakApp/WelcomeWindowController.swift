@@ -47,17 +47,22 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
 
     private let actions: Actions
     private let shortcutLabel: String
+    private let shortcutWords: String
     private var window: NSWindow?
     private var accessibilityButton: NSButton?
     private var accessibilityNote: NSTextField?
+    private var statusIcon: NSImageView?
+    private var statusText: NSTextField?
+    private var startButton: NSButton?
     private var loginCheckbox: NSButton?
     /// Invalidated in `windowWillClose`, which is the only way this window ends. Not in
     /// `deinit`: a nonisolated deinit cannot touch a main-actor, non-Sendable Timer under
     /// strict concurrency, and the controller outlives the window anyway.
     private var pollTimer: Timer?
 
-    init(shortcutLabel: String, actions: Actions) {
+    init(shortcutLabel: String, shortcutWords: String, actions: Actions) {
         self.shortcutLabel = shortcutLabel
+        self.shortcutWords = shortcutWords
         self.actions = actions
         super.init()
     }
@@ -107,9 +112,11 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
         let title = label("MoxSpeak", font: .systemFont(ofSize: 22, weight: .semibold))
         title.alignment = .center
 
+        let hint = MenuBarHintView()
+
         let whereItIs = label(
-            "MoxSpeak lives in your menu bar, up there. It has no window and no "
-            + "Dock icon — that's normal.",
+            "Look for this icon at the top of your screen. MoxSpeak has no window and "
+            + "no Dock icon. That is normal.",
             font: .systemFont(ofSize: 13), secondary: true)
         whereItIs.alignment = .center
 
@@ -119,6 +126,32 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
 
         let key = label(shortcutLabel, font: .systemFont(ofSize: 26, weight: .medium))
         key.alignment = .center
+
+        // The glyphs and the words, together. ⌃ and ⌥ are used by far more people than
+        // can name them — ⌃ is regularly read as ⌘ or as a stray mark — and somebody who
+        // cannot decode the symbols cannot use the app at all. Showing both costs one
+        // line and removes the only step here that can silently fail.
+        let keyWords = label(shortcutWords, font: .systemFont(ofSize: 12), secondary: true)
+        keyWords.alignment = .center
+
+        // A status line above the button, because the state it reports is the difference
+        // between the app in the advert and a clipboard reader. Amber rather than red:
+        // nothing is broken, it just is not set up yet, and red would say something has
+        // gone wrong that the user has to repair.
+        let statusIconView = NSImageView()
+        statusIconView.imageScaling = .scaleProportionallyUpOrDown
+        statusIconView.translatesAutoresizingMaskIntoConstraints = false
+        statusIconView.widthAnchor.constraint(equalToConstant: 15).isActive = true
+        statusIconView.heightAnchor.constraint(equalToConstant: 15).isActive = true
+        statusIcon = statusIconView
+
+        let statusLabel = label("", font: .systemFont(ofSize: 12, weight: .medium))
+        statusText = statusLabel
+
+        let statusRow = NSStackView(views: [statusIconView, statusLabel])
+        statusRow.orientation = .horizontal
+        statusRow.spacing = 5
+        statusRow.alignment = .centerY
 
         let button = NSButton(title: "Turn on Select-to-Speak", target: self,
                               action: #selector(enableAccessibility))
@@ -142,7 +175,7 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
         let start = NSButton(title: "Start", target: self, action: #selector(finish))
         start.bezelStyle = .rounded
         start.controlSize = .large
-        start.keyEquivalent = "\r"
+        startButton = start
 
         let privacy = label(
             "Sends anonymous usage stats. No text you select or copy ever leaves your "
@@ -151,20 +184,25 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
         privacy.alignment = .center
 
         let stack = NSStackView(views: [
-            icon, title, whereItIs,
-            separator(), howTo, key, separator(),
-            button, note, login, start, privacy,
+            icon, title, hint, whereItIs,
+            separator(), howTo, key, keyWords, separator(),
+            statusRow, button, note, login, start, privacy,
         ])
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = 10
         stack.setCustomSpacing(4, after: icon)
+        stack.setCustomSpacing(12, after: title)
+        stack.setCustomSpacing(8, after: hint)
         stack.setCustomSpacing(14, after: whereItIs)
         stack.setCustomSpacing(2, after: howTo)
+        stack.setCustomSpacing(1, after: key)
+        stack.setCustomSpacing(16, after: keyWords)
+        stack.setCustomSpacing(8, after: statusRow)
         stack.setCustomSpacing(6, after: button)
         stack.setCustomSpacing(18, after: note)
         stack.setCustomSpacing(18, after: login)
-        stack.edgeInsets = NSEdgeInsets(top: 26, left: 30, bottom: 20, right: 30)
+        stack.edgeInsets = NSEdgeInsets(top: 24, left: 30, bottom: 20, right: 30)
         stack.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -226,19 +264,69 @@ final class WelcomeWindowController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Reflects the one thing on this window that can be in two states, and moves the
+    /// emphasis with it.
+    ///
+    /// The first version of this got the hierarchy exactly backwards: "Start" was the
+    /// default button, rendered blue and bound to Return, while "Turn on
+    /// Select-to-Speak" sat beside it as an ordinary control. So the loudest thing on the
+    /// window, and the one Return pressed, was the button that skips the only setup step
+    /// there is. People did what the design told them to do.
+    ///
+    /// Now the emphasis is wherever the remaining work is. Off: an amber warning, the
+    /// permission button is the default, and Start is demoted to "Skip for now" so
+    /// choosing it is a decision rather than a reflex. On: a green check, the permission
+    /// button becomes an inert confirmation, and Start becomes the default.
     private func refreshAccessibilityState() {
-        guard let button = accessibilityButton else { return }
-        if actions.isAccessibilityTrusted() {
+        guard let button = accessibilityButton, let start = startButton else { return }
+        let trusted = actions.isAccessibilityTrusted()
+
+        if trusted {
+            statusIcon?.image = NSImage(systemSymbolName: "checkmark.circle.fill",
+                                        accessibilityDescription: nil)
+            statusIcon?.contentTintColor = .systemGreen
+            statusText?.stringValue = "Select-to-Speak is on"
+            statusText?.textColor = .secondaryLabelColor
+
             button.isEnabled = false
             button.title = "Select-to-Speak is on"
-            accessibilityNote?.stringValue =
-                "MoxSpeak will read whatever you've selected."
+            button.keyEquivalent = ""
+            accessibilityNote?.stringValue = "MoxSpeak will read whatever you've selected."
+
+            start.title = "Start"
+            start.keyEquivalent = "\r"
+
             pollTimer?.invalidate()
             pollTimer = nil
         } else {
+            statusIcon?.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill",
+                                        accessibilityDescription: nil)
+            statusIcon?.contentTintColor = .systemOrange
+            statusText?.stringValue = "One step left"
+            statusText?.textColor = .systemOrange
+
             button.isEnabled = true
             button.title = "Turn on Select-to-Speak"
+            button.keyEquivalent = "\r"
+            accessibilityNote?.stringValue =
+                "Without this, MoxSpeak reads whatever you last copied instead of what "
+                + "you've selected."
+
+            start.title = "Skip for now"
+            start.keyEquivalent = ""
         }
+        // Only one button may own Return, and AppKit keeps its own pointer to it.
+        window?.defaultButtonCell = (trusted ? start : button).cell as? NSButtonCell
+
+        // Tint the primary action explicitly rather than relying on the default-button
+        // highlight. AppKit only paints that blue while the window is key, and this window
+        // can perfectly well be looked at without being focused — the first build of this
+        // rendered both buttons identically grey, so the whole point of the hierarchy was
+        // lost exactly when somebody was reading it rather than driving it.
+        let primary = trusted ? start : button
+        let secondary = trusted ? button : start
+        primary.bezelColor = .controlAccentColor
+        secondary.bezelColor = nil
     }
 
     // MARK: - Finishing

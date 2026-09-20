@@ -103,13 +103,13 @@ enum Reset {
         /// reset that half worked is exactly the state a user must not be left believing
         /// is a whole one.
         var summary: String {
-            if isClean { return "Reset — MoxSpeak is back to how it starts" }
+            if isClean { return "Reset. MoxSpeak is back to how it starts." }
             var problems: [String] = []
             if !preferencesCleared || !leftoverKeys.isEmpty {
                 problems.append("settings could not all be cleared")
             }
             if !logCleared { problems.append(logProblem ?? "the log could not be deleted") }
-            return "Reset was incomplete — " + problems.joined(separator: "; ")
+            return "Reset was incomplete. " + problems.joined(separator: "; ")
         }
     }
 

@@ -419,3 +419,31 @@ import Testing
                 == HotkeyAction.pause.defaultHotkey)
     }
 }
+
+/// The welcome window shows the glyphs and the words together, because ⌃ and ⌥ are used
+/// by many more people than can name them.
+@Test func aShortcutCanBeSpelledOutInWords() {
+    #expect(HotkeyAction.speak.defaultHotkey.spelledOut == "Control + Option + S")
+    #expect(HotkeyAction.pause.defaultHotkey.spelledOut == "Control + Option + D")
+    #expect(HotkeyAction.stop.defaultHotkey.spelledOut == "Control + Option + X")
+
+    // Apple's order, matching the glyph order and what System Settings calls them.
+    let everything = Hotkey(keyCode: UInt32(kVK_ANSI_K),
+                            modifiers: Hotkey.control | Hotkey.option
+                                     | Hotkey.shift | Hotkey.command)
+    #expect(everything.spelledOut == "Control + Option + Shift + Command + K")
+    #expect(everything.label == "⌃⌥⇧⌘K")
+
+    // Non-letter keys are named, not left blank — "Control + Space", never "Control + ".
+    #expect(Hotkey(keyCode: UInt32(kVK_Space), modifiers: Hotkey.control).spelledOut
+            == "Control + Space")
+
+    // Every default must produce words for each of its glyphs; a spelled-out form that
+    // silently drops a modifier would be worse than showing none.
+    for action in HotkeyAction.allCases {
+        let hotkey = action.defaultHotkey
+        let glyphCount = hotkey.label.count - Hotkey.keyName(for: hotkey.keyCode).count
+        #expect(hotkey.spelledOut.components(separatedBy: " + ").count == glyphCount + 1,
+                Comment(rawValue: "\(hotkey.label) spelled out as \(hotkey.spelledOut)"))
+    }
+}
