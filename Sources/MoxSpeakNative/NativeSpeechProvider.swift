@@ -82,17 +82,40 @@ public actor NativeSpeechProvider: SpeechProvider {
     ///    MisakiSwift emits 1.05-1.11 phonemes per character on ordinary English (1.30 on
     ///    very short strings), so 100 characters is ~110 tokens against a 510 limit.
     ///
-    /// So the cap is set by language rather than by the engine: **100 characters is about
-    /// the smallest chunk that still holds a whole typical English sentence**, and every
-    /// chunk boundary is a place where Kokoro restarts its prosody contour. Below it the
-    /// segmenter starts splitting sentences mid-clause for latency the user cannot
-    /// perceive — 100 characters is already ~0.25 s in a release build, half the plan's
-    /// half-second target and well inside the noise of pressing a hotkey.
+    /// So the cap is set by language rather than by the engine, and the question is how
+    /// much English has to fit. Every chunk boundary is a place where Kokoro restarts its
+    /// prosody contour, so a boundary the segmenter puts mid-clause is *heard* as a full
+    /// stop in the wrong place. The segmenter's ladder goes sentence, then clause, then
+    /// word, then hard split: the first two rungs produce boundaries a listener accepts
+    /// and the last two do not, so the cap has to be large enough that ordinary prose
+    /// never reaches the word rung.
     ///
-    /// Honest caveat: the seam cost has not been measured acoustically. 100 produces about
-    /// 50% more chunk boundaries across a long article than the server's 150 does, and
-    /// nobody has listened for whether that is audible. If it turns out to be, this number
-    /// should go up rather than the reasoning being rewritten.
+    /// **This was 100, and 100 was too small.** It was chosen as "about the smallest chunk
+    /// that still holds a whole typical English sentence", with a note admitting the
+    /// acoustic cost was unmeasured and that the number should go up if it turned out to be
+    /// audible. It was audible, and the failure was worse than extra seams: at 100 the
+    /// ladder routinely fell through to splitting *between two words of the same clause*.
+    /// Read back a paragraph and the engine stopped between "lots of" and "awkward".
+    /// 100 characters is not a typical English sentence; it is about two thirds of one.
+    ///
+    /// 200 is where ordinary prose stops being cut mid-clause — `ChunkBoundaryQualityTests`
+    /// holds the property and the measurement showing it is a cliff rather than a gradient.
+    /// It costs nothing that matters:
+    ///
+    /// - **Time to first sound is unchanged.** `Segmenter.Options.firstChunkCap` is 100 and
+    ///   `Options(providerCap:)` only ever lowers it, so chunk 0 is the same size it was.
+    ///   This cap governs chunks 1..n, which are rendered while chunk 0 is already playing.
+    /// - **Resident memory is flat.** 262 MB at a 100-character cap, 267 MB at 200, across
+    ///   the sweep in `printsTheChunkSizeSweep`. The MLX high-water figure in point 2 rises,
+    ///   but the app pins `MLX.Memory.memoryLimit` to `defaultMLXMemoryLimit` regardless.
+    /// - **Nothing truncates.** Audio duration stays linear in characters out to 400, so
+    ///   the ~180-character loss in the spec's Known Issues is a PyTorch-MPS problem in the
+    ///   HTTP server, not a property of this engine.
+    /// - **Playback is still fed.** 8x realtime at 200 against 9x at 100.
+    ///
+    /// The one thing that does get worse is granularity: a failed chunk costs more to retry
+    /// and a cancel lands on a coarser boundary. Both are bounded by the validation ladder
+    /// in `SpeechSession`, and neither is audible the way a stop mid-clause is.
     ///
     /// Two related numbers that are *not* this one:
     ///
@@ -103,7 +126,7 @@ public actor NativeSpeechProvider: SpeechProvider {
     ///   against the 510-token context window. Different question, different number.
     public nonisolated var recommendedCharacterCap: Int { Self.measuredCharacterCap }
 
-    static let measuredCharacterCap = 100
+    static let measuredCharacterCap = 200
 
     /// Ceiling on MLX's total allocation (`MLX.Memory.memoryLimit`), applied once when the
     /// model loads.

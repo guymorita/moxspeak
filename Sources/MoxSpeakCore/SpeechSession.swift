@@ -26,6 +26,11 @@ public actor SpeechSession {
     private let estimator: DurationEstimator
     private let validation: ValidationPolicy
 
+    /// Strips Kokoro's per-utterance edge padding and replaces it with a pause sized
+    /// by the text, so consecutive chunks join without a second of dead air between
+    /// them. See `AudioSeam`.
+    private let seam: AudioSeam
+
     /// The chunk size this session will never exceed, and whether it normalizes text
     /// before segmenting. Both come from the provider, once, at construction.
     ///
@@ -58,7 +63,8 @@ public actor SpeechSession {
                 normalizer: TextNormalizer = TextNormalizer(),
                 segmenter: Segmenter? = nil,
                 estimator: DurationEstimator = DurationEstimator(),
-                validation: ValidationPolicy = ValidationPolicy()) {
+                validation: ValidationPolicy = ValidationPolicy(),
+                seam: AudioSeam = AudioSeam()) {
         self.provider = provider
         self.preparer = preparer
         self.normalizer = normalizer
@@ -67,6 +73,7 @@ public actor SpeechSession {
         self.segmenter = resolvedSegmenter
         self.estimator = estimator
         self.validation = validation
+        self.seam = seam
         // Read from the segmenter that was actually adopted, not from the provider, so an
         // explicitly supplied segmenter is reported as what it is rather than as what the
         // provider would have asked for.
@@ -183,9 +190,21 @@ public actor SpeechSession {
         states[chunk.id] = .synthesizing
 
         do {
-            let data = try await synthesizeValidated(chunk: chunk, voice: voice)
+            let raw = try await synthesizeValidated(chunk: chunk, voice: voice)
             // The generation may have advanced while this was in flight.
             guard generation == currentGeneration else { return }
+
+            // Seam handling happens *after* validation, never before. The duration check
+            // in `isAcceptable` is calibrated against what the engine returns, padding
+            // included; trimming first would shorten every chunk by the better part of a
+            // second and quietly re-tune a threshold that exists to catch truncation.
+            // The final chunk is trimmed but gets no trailing gap — there is nothing
+            // after it to be continuous with, and silence on the end only delays the
+            // moment playback reports itself finished.
+            let isLast = chunk.id == chunks.last?.id
+            let data = isLast
+                ? seam.trim(raw, format: provider.outputFormat)
+                : seam.join(raw, endingWith: chunk.text, format: provider.outputFormat)
             let duration = estimator.duration(ofBytes: data.count, format: provider.outputFormat)
             states[chunk.id] = .rendered(data: data, duration: duration)
         } catch is CancellationError {
@@ -254,11 +273,16 @@ public actor SpeechSession {
             // Halves are appended in document order. Order is invisible to the duration
             // check — reversed audio has exactly the right length — so it is guaranteed
             // here by construction and asserted directly in the tests.
-            for piece in halves {
+            for (index, piece) in halves.enumerated() {
                 try Task.checkCancellation()
                 let data = try await synthesizeWithRecovery(text: piece, voice: voice,
                                                              depth: depth + 1)
-                combined.append(data)
+                // Halves stack the same edge padding a chunk seam does, and this seam is
+                // always mid-clause — `splitInHalf` cuts at the word nearest the middle,
+                // with no regard for punctuation — so it gets no gap at all. The last
+                // half keeps its tail: the caller trims the assembled chunk.
+                combined.append(index == halves.count - 1 ? data
+                                                          : seam.trim(data, format: provider.outputFormat))
             }
             return combined
         }

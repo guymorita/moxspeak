@@ -51,6 +51,14 @@ public actor FakeProvider: SpeechProvider {
         /// Fails the first `count` calls with empty audio, then behaves normally.
         /// Models the real backend, whose failures are intermittent rather than deterministic.
         case failingFirst(count: Int)
+        /// Audible audio wrapped in leading and trailing digital silence, the way Kokoro
+        /// actually returns it — measured at roughly 0.42 s and 0.57 s respectively.
+        ///
+        /// `.normal` returns pure silence, because for most tests only the byte count
+        /// carries meaning. That makes it useless for anything about seams: `AudioSeam`
+        /// deliberately leaves all-silent audio alone, so a session that skipped trimming
+        /// entirely would still pass every `.normal` test.
+        case padded(lead: TimeInterval, tail: TimeInterval)
     }
 
     public nonisolated var outputFormat: AudioFormat { .kokoroPCM }
@@ -121,6 +129,13 @@ public actor FakeProvider: SpeechProvider {
         case .normal:
             try Task.checkCancellation()
             return audio(forCharacters: text.count, fraction: 1.0)
+
+        case .padded(let lead, let tail):
+            try Task.checkCancellation()
+            var data = Data(count: byteCount(seconds: lead))
+            data.append(tone(seconds: estimator.estimate(characterCount: text.count)))
+            data.append(Data(count: byteCount(seconds: tail)))
+            return data
         }
     }
 
@@ -133,5 +148,23 @@ public actor FakeProvider: SpeechProvider {
         let bytes = Int(seconds * Double(outputFormat.bytesPerSecond))
         // Silence is fine; only the byte count carries meaning in tests.
         return Data(count: max(0, bytes))
+    }
+
+    private func byteCount(seconds: TimeInterval) -> Int {
+        let frame = outputFormat.channels * (outputFormat.bitDepth / 8)
+        let bytes = max(0, Int(seconds * Double(outputFormat.bytesPerSecond)))
+        return bytes - bytes % frame
+    }
+
+    /// A full-scale square wave — loud enough that no silence threshold mistakes it for
+    /// padding, and trivial to generate without a sine table.
+    private func tone(seconds: TimeInterval) -> Data {
+        let samples = byteCount(seconds: seconds) / 2
+        var data = Data(capacity: samples * 2)
+        for i in 0..<samples {
+            let value: Int16 = i % 2 == 0 ? 12000 : -12000
+            withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
+        }
+        return data
     }
 }
