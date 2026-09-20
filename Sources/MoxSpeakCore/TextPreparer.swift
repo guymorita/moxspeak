@@ -144,7 +144,17 @@ public struct TextPreparer: Sendable {
                 // quote means a new thought: the next heading, bullet or row.
                 let continuesSentence = !sawBlankLine
                     && content.first?.isLowercase == true
-                result += Self.separator(after: result, breaking: !continuesSentence)
+                // A paragraph break survives as a newline, taking the place of the space
+                // that would otherwise join the two. It is the only whitespace in the
+                // prepared text that carries meaning: `Segmenter` breaks a chunk there
+                // and marks it, and `AudioSeam` gives it a longer pause than a sentence.
+                // Without it a new paragraph is acoustically identical to the next
+                // sentence, which is exactly how it sounded.
+                var separator = Self.separator(after: result, breaking: !continuesSentence)
+                if sawBlankLine {
+                    separator = String(separator.dropLast()) + "\n"
+                }
+                result += separator
                 result += content
             }
             sawBlankLine = false
@@ -244,6 +254,9 @@ public struct TextPreparer: Sendable {
         return out
     }
 
+    /// Runs of spaces become one space. Newlines are left alone: by this point the only
+    /// ones left are paragraph breaks, put there deliberately by `collapseNewlines`, and
+    /// collapsing them would throw away the distinction it exists to preserve.
     private func collapseWhitespace(_ text: String) -> String {
         text.replacing(/[ \t\u{00A0}]+/, with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)

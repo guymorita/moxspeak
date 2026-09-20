@@ -204,7 +204,9 @@ public actor SpeechSession {
             let isLast = chunk.id == chunks.last?.id
             let data = isLast
                 ? seam.trim(raw, format: provider.outputFormat)
-                : seam.join(raw, endingWith: chunk.text, format: provider.outputFormat)
+                : seam.join(raw, endingWith: chunk.text,
+                            endsParagraph: chunk.endsParagraph,
+                            format: provider.outputFormat)
             let duration = estimator.duration(ofBytes: data.count, format: provider.outputFormat)
             states[chunk.id] = .rendered(data: data, duration: duration)
         } catch is CancellationError {

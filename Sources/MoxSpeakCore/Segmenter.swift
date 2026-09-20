@@ -67,6 +67,9 @@ public struct Segmenter: Sendable {
         let sourceStart: Int
         let sourceEnd: Int
         var startsSentence: Bool = false
+        /// A paragraph break followed this unit in the source. Forces a chunk boundary,
+        /// so the pause `AudioSeam` gives a paragraph lands in the right place.
+        var endsParagraph: Bool = false
     }
 
     /// The options this segmenter was built with. Readable because callers that hand a
@@ -100,7 +103,9 @@ public struct Segmenter: Sendable {
         // Units are sentences; anything over the cap is pre-split into clause or word
         // pieces so the packer only ever sees things that fit.
         var units: [Unit] = []
-        for sentence in sentences(in: trimmed) {
+        let found = sentences(in: trimmed)
+        for (index, sentence) in found.enumerated() {
+            let nextStart = index + 1 < found.count ? found[index + 1].start : trimmed.count
             var sentenceUnits: [Unit]
             if sentence.text.count <= options.characterCap {
                 sentenceUnits = [Unit(text: sentence.text, spaced: true,
@@ -113,11 +118,27 @@ public struct Segmenter: Sendable {
             // starts; everything after it is a continuation of the same sentence.
             if !sentenceUnits.isEmpty {
                 sentenceUnits[0].startsSentence = true
+                // `TextPreparer` leaves exactly one kind of newline in the prepared text:
+                // a paragraph break. NLTokenizer treats it as whitespace between
+                // sentences and drops it, so it is found by looking at the gap rather
+                // than in the sentence text.
+                let gapStart = sentence.start + sentence.text.count
+                if Self.containsNewline(in: trimmed, from: gapStart, to: nextStart) {
+                    sentenceUnits[sentenceUnits.count - 1].endsParagraph = true
+                }
             }
             units.append(contentsOf: sentenceUnits)
         }
 
         return pack(units, offsetAdjustment: leadingTrim)
+    }
+
+    /// Whether `text` holds a newline in `[from, to)`, in Character offsets.
+    private static func containsNewline(in text: String, from: Int, to: Int) -> Bool {
+        guard from < to, to <= text.count, from >= 0 else { return false }
+        let start = text.index(text.startIndex, offsetBy: from)
+        let end = text.index(text.startIndex, offsetBy: to)
+        return text[start..<end].contains("\n")
     }
 
     // MARK: - Sentence detection
@@ -361,6 +382,7 @@ public struct Segmenter: Sendable {
         var currentStart: Int?
         var currentEnd = 0
         var currentSentenceOffsets: [Int] = []
+        var currentEndsParagraph = false
 
         func capForNextChunk() -> Int {
             chunks.isEmpty ? min(options.firstChunkCap, options.characterCap)
@@ -374,10 +396,12 @@ public struct Segmenter: Sendable {
                                 estimatedDuration: estimator.estimate(characterCount: currentText.count),
                                 sourceStart: currentStart ?? offsetAdjustment,
                                 sourceEnd: currentEnd,
-                                sentenceOffsets: currentSentenceOffsets))
+                                sentenceOffsets: currentSentenceOffsets,
+                                endsParagraph: currentEndsParagraph))
             currentText = ""
             currentStart = nil
             currentSentenceOffsets = []
+            currentEndsParagraph = false
         }
 
         /// Starts a brand-new chunk-in-progress with `unit` as its only content so far.
@@ -414,6 +438,14 @@ public struct Segmenter: Sendable {
                 currentText += unit.text
                 if currentStart == nil { currentStart = unit.sourceStart + offsetAdjustment }
                 currentEnd = unitAbsEnd
+                // A paragraph ends the chunk regardless of how much room is left. The
+                // pause belongs at the boundary, and `AudioSeam` can only put it between
+                // chunks — text packed on after this one would bury it mid-chunk, where
+                // Kokoro decides the timing and treats it as an ordinary sentence.
+                if unit.endsParagraph {
+                    currentEndsParagraph = true
+                    emit()
+                }
                 continue
             }
 

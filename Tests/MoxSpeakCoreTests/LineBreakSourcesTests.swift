@@ -19,7 +19,7 @@ import Testing
         let lf = "For Developers\n\nStart with code.\nScale without limits."
         #expect(Self.prepared(crlf) == Self.prepared(lf),
                 Comment(rawValue: "CRLF: \(Self.prepared(crlf))"))
-        #expect(Self.prepared(crlf).hasPrefix("For Developers. Start with code."))
+        #expect(Self.prepared(crlf).hasPrefix("For Developers.\nStart with code."))
         #expect(!Self.prepared(crlf).contains("\r"))
     }
 
@@ -122,7 +122,7 @@ import Testing
     @Test func trailingAndRepeatedBlankLinesAddNothing() {
         #expect(Self.prepared("Just one line\n") == "Just one line")
         #expect(Self.prepared("Just one line\n\n\n") == "Just one line")
-        #expect(Self.prepared("One.\n\n\n\nTwo.") == "One. Two.")
+        #expect(Self.prepared("One.\n\n\n\nTwo.") == "One.\nTwo.")
         #expect(!Self.prepared("A heading\n\n\nBody text here.").contains(".."))
     }
 }

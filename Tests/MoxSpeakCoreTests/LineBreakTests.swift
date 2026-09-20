@@ -72,7 +72,7 @@ import Testing
     /// on the next line, because nothing wraps across a blank line.
     @Test func aBlankLineAlwaysBreaks() {
         let out = Self.prepared("the end of something\n\nand the start of another")
-        #expect(out == "the end of something. and the start of another",
+        #expect(out == "the end of something.\nand the start of another",
                 Comment(rawValue: out))
     }
 

@@ -56,6 +56,16 @@ public struct AudioSeam: Sendable {
         /// the segmenter only splits between words when a clause overran the character
         /// cap, and there is no pause there in speech.
         public var sentenceGap: TimeInterval = 0.35
+
+        /// A paragraph break. Measurably longer than a sentence, because it was
+        /// indistinguishable from one and that is what got reported: reading an essay,
+        /// the gap between two paragraphs came out at 443 ms while the ordinary sentence
+        /// breaks around it measured 298, 452, 418 and 396. The text changed shape and
+        /// the audio did not, so it sounded like the same paragraph continuing.
+        ///
+        /// Roughly double the sentence gap, which is about what a person does reading
+        /// aloud.
+        public var paragraphGap: TimeInterval = 0.75
         public var clauseGap: TimeInterval = 0.12
         public var wordGap: TimeInterval = 0
 
@@ -135,7 +145,8 @@ public struct AudioSeam: Sendable {
     }
 
     /// How long a pause belongs after a chunk ending in this text.
-    public func gapSeconds(after text: String) -> TimeInterval {
+    public func gapSeconds(after text: String, endsParagraph: Bool = false) -> TimeInterval {
+        if endsParagraph { return options.paragraphGap }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let last = trimmed.last else { return options.wordGap }
         if ".!?…".contains(last) { return options.sentenceGap }
@@ -145,9 +156,11 @@ public struct AudioSeam: Sendable {
 
     /// Trim a chunk and give it the pause its own punctuation earns. The convenience the
     /// session actually calls.
-    public func join(_ data: Data, endingWith text: String, format: AudioFormat) -> Data {
+    public func join(_ data: Data, endingWith text: String,
+                     endsParagraph: Bool = false, format: AudioFormat) -> Data {
         var audio = trim(data, format: format)
-        audio.append(silence(seconds: gapSeconds(after: text), format: format))
+        audio.append(silence(seconds: gapSeconds(after: text, endsParagraph: endsParagraph),
+                             format: format))
         return audio
     }
 }

@@ -58,8 +58,17 @@ public struct Chunk: Equatable, Sendable, Identifiable {
     /// actual sentence starts are.
     public let sentenceOffsets: [Int]
 
+    /// True when a paragraph break followed this chunk in the source.
+    ///
+    /// Carried all the way to `AudioSeam`, which gives it a longer pause than a sentence
+    /// gets. Without it a new paragraph is acoustically identical to the next sentence,
+    /// and a reader cannot hear the shape of what they are listening to.
+    public let endsParagraph: Bool
+
     public init(id: Int, text: String, estimatedDuration: TimeInterval,
-                sourceStart: Int, sourceEnd: Int, sentenceOffsets: [Int]) {
+                sourceStart: Int, sourceEnd: Int, sentenceOffsets: [Int],
+                endsParagraph: Bool = false) {
+        self.endsParagraph = endsParagraph
         self.id = id
         self.text = text
         self.estimatedDuration = estimatedDuration

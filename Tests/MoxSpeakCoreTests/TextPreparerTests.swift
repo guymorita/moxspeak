@@ -42,10 +42,17 @@ import Foundation
     #expect(p.prepare(pdf) == "The quick brown fox jumped over the lazy dog.")
 }
 
-@Test func preservesParagraphBreaksAsSentenceBoundaries() {
+/// A paragraph break survives as a newline, and it is the only newline left in prepared
+/// text. It used to become a plain space, which made a new paragraph acoustically
+/// identical to the next sentence — `Segmenter` breaks a chunk here and `AudioSeam` gives
+/// it a longer pause, and neither can happen if the boundary is thrown away.
+@Test func paragraphBreaksSurviveAsNewlines() {
     let p = TextPreparer()
-    let input = "First para.\n\nSecond para."
-    #expect(p.prepare(input) == "First para. Second para.")
+    #expect(p.prepare("First para.\n\nSecond para.") == "First para.\nSecond para.")
+    // A run of blank lines is still one break.
+    #expect(p.prepare("First para.\n\n\n\nSecond para.") == "First para.\nSecond para.")
+    // A soft wrap is not a paragraph break and gains nothing.
+    #expect(p.prepare("one long line that\nwrapped here") == "one long line that wrapped here")
 }
 
 @Test func announcesFencedCodeBlocksByDefault() {
@@ -59,7 +66,8 @@ import Foundation
     opts.codeBlocks = .skip
     let p = TextPreparer(options: opts)
     let input = "Before.\n```swift\nlet x = 1\n```\nAfter."
-    #expect(p.prepare(input) == "Before. After.")
+    // Removing the block leaves a block-level gap, which is a paragraph break.
+    #expect(p.prepare(input) == "Before.\nAfter.")
 }
 
 @Test func stripsEmoji() {
