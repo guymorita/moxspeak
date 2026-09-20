@@ -67,7 +67,7 @@
   a:focus-visible { outline: 2px solid var(--gem); outline-offset: 3px; border-radius: 3px; }
 
   /* ---- hero ---- */
-  header { padding: 72px 0 44px; text-align: center; }
+  header { padding: 72px 0 18px; text-align: center; }
   header img { width: 104px; height: 104px; }
   h1 {
     font-family: var(--display);
@@ -129,13 +129,34 @@
     padding: 16px 16px 13px; font-size: 0.92rem; color: var(--ink-soft);
     display: flex; flex-direction: column; gap: 9px;
   }
-  .quote q { quotes: none; color: var(--ink); }
-  .quote q::before, .quote q::after { content: ""; }
+  .quote q {
+    quotes: "\201C" "\201D";
+    color: var(--ink);
+    font-style: italic;
+    font-size: 1rem;
+    line-height: 1.5;
+    position: relative;
+    z-index: 1;
+  }
+  /* An oversized opening mark, set behind the text and clipped by the card, so the
+     block reads as a quotation at a glance rather than on inspection. */
+  .quote::before {
+    content: "\201C";
+    position: absolute;
+    top: -14px; left: 8px;
+    font-family: var(--display);
+    font-size: 4.6rem;
+    line-height: 1;
+    color: var(--gem);
+    opacity: 0.13;
+    pointer-events: none;
+  }
+  .quote { position: relative; overflow: hidden; }
   .quote .who { font-size: 0.78rem; color: var(--ink-faint); margin-top: auto; }
   .quote .who a { color: var(--ink-faint); text-decoration: underline;
                   text-underline-offset: 2px; }
   .about { font-size: 0.78rem; color: var(--ink-faint); text-align: center;
-           margin: 26px 0 0; }
+           margin: 14px 0 0; }
 
   /* ---- the one demo: the keystroke ---- */
   .keys {
@@ -166,7 +187,7 @@
   .keys .said { margin: 14px 0 0; font-size: 0.82rem; color: var(--ink-faint); }
 
   /* ---- sections ---- */
-  section { padding: 56px 0 0; }
+  section { padding: 44px 0 0; }
   h2 {
     font-family: var(--display);
     font-weight: 700;
@@ -245,10 +266,9 @@
 
   <div class="quotes">
     <div class="quote">
-      <q>Keeps up really well until you get to their larger models with their
-      professional voices.</q>
-      <span class="who">rnxrx, comparing it to ElevenLabs &middot;
-        <a href="https://news.ycombinator.com/item?id=48825228">Hacker News</a></span>
+      <q>The voices are better than the cloud provider IMO.</q>
+      <span class="who">jonmagic, switching from ElevenLabs &middot;
+        <a href="https://news.ycombinator.com/item?id=48832850">Hacker News</a></span>
     </div>
     <div class="quote">
       <q>The most natural sounding and small too.</q>
@@ -262,8 +282,7 @@
         <a href="https://news.ycombinator.com/item?id=48829204">Hacker News</a></span>
     </div>
   </div>
-  <p class="about">Those are about Kokoro, the open voice model MoxSpeak runs, not about
-  MoxSpeak itself. Every one links to the comment it came from.</p>
+  <p class="about">On Kokoro, the open voice model MoxSpeak runs.</p>
 </header>
 
 <section>
