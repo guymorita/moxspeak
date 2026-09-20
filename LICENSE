@@ -1,0 +1,45 @@
+MoxSpeak Source-Available Licence
+Copyright (c) 2026 Guy Morita. All rights reserved.
+
+WHY THIS SOURCE IS PUBLIC
+
+MoxSpeak asks macOS for Accessibility access so it can read the text you have
+selected. That is a serious permission to grant a program, and you should not
+have to take anyone's word for what it does with it. The source is published so
+that you, or anyone you trust, can read exactly what is sent off your machine
+and what is not. It is not published as an invitation to redistribute it.
+
+WHAT YOU MAY DO
+
+- Read, study and audit this source code, for any purpose.
+- Build it and run your own build on machines you own or control.
+- Modify it for your own use.
+- Submit changes back to the project.
+- Quote it, in whole or in part, in reviews, articles, security write-ups and
+  teaching materials.
+
+WHAT YOU MAY NOT DO, without prior written permission from the copyright holder
+
+- Redistribute this software, or any work derived from it, in source or binary
+  form, whether free of charge or not.
+- Publish, host, sell, sublicense or offer it as a service.
+- Remove or alter this notice, the copyright notices, or the third-party
+  attributions in THIRD-PARTY-NOTICES.md.
+
+THIRD-PARTY COMPONENTS
+
+This licence covers only the original work in this repository. Everything under
+Sources/Vendor/, the MLX dependency, and the bundled Kokoro model weights and
+voice vectors are the work of others and are governed by their own licences,
+which are more permissive than this one. They are listed in full in
+THIRD-PARTY-NOTICES.md, which ships inside the application. Nothing in this
+licence restricts any right those licences grant you in those components.
+
+NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR OR
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
