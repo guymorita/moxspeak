@@ -47,6 +47,10 @@ MoxSpeak lives in the menu bar. It has no window and no Dock icon.
 
 All three are rebindable under **Keyboard Shortcuts…** in the menu.
 
+While something is being read, MoxSpeak appears in Control Center and on the lock screen
+with a real scrubber. The media keys move back and forward by fifteen seconds, the same as
+a podcast player, and the timeline can be dragged.
+
 **Select-to-Speak** needs Accessibility permission, which macOS asks for on first launch.
 Without it MoxSpeak still works, but it reads whatever you last copied rather than what
 you have selected.
@@ -63,6 +67,8 @@ MoxSpeak answers a `moxspeak://` URL, so any launcher can drive it without an ex
 open -g "moxspeak://speak"    # read the selection
 open -g "moxspeak://pause"
 open -g "moxspeak://stop"
+open -g "moxspeak://back"     # 15 seconds
+open -g "moxspeak://forward"
 ```
 
 The `-g` matters: without it macOS brings MoxSpeak to the front, it becomes the frontmost

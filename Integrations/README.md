@@ -8,12 +8,19 @@ on macOS already speaks. There is no extension to install and nothing to keep up
 | `moxspeak://speak` | Read the selection, or the last thing copied |
 | `moxspeak://pause` | Pause or resume |
 | `moxspeak://stop` | Stop |
+| `moxspeak://back` | Back 15 seconds |
+| `moxspeak://forward` | Forward 15 seconds |
+| `moxspeak://skip?seconds=-30` | Move by any amount |
 | `moxspeak://speak?text=Hello` | Read this exact text, ignoring the selection |
 
 Always open these with **`open -g`**. Without `-g`, macOS brings MoxSpeak to the front, it
 becomes the frontmost application, and the selection it goes looking for is its own.
 
 The built-in shortcuts keep working. This is an extra door, not a replacement.
+
+You may not need any of this for skipping: MoxSpeak publishes a real Now Playing timeline,
+so the media keys, the Control Center buttons and a paired set of AirPods already move by
+fifteen seconds and can scrub.
 
 ## Raycast
 

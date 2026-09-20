@@ -26,6 +26,16 @@ final class NowPlayingController {
 
     private let commandCenter = MPRemoteCommandCenter.shared()
     private let infoCenter = MPNowPlayingInfoCenter.default()
+
+    /// What the media keys and the Control Center buttons move by. Fifteen seconds is
+    /// what every podcast player uses, which makes it the interval people already expect
+    /// from that button.
+    static let skipSeconds: Double = 15
+
+    /// Seek by a relative amount. Negative goes back.
+    var onSkip: ((Double) -> Void)?
+    /// Seek to an absolute position, from dragging the scrubber.
+    var onScrub: ((TimeInterval) -> Void)?
     private var isActivated = false
 
     /// Wires the remote commands. Called once at launch.
@@ -41,14 +51,40 @@ final class NowPlayingController {
         enable(commandCenter.pauseCommand) { [weak self] in self?.onTogglePlayPause?() }
         enable(commandCenter.stopCommand) { [weak self] in self?.onStop?() }
 
+        // Skipping, in the OS's own controls rather than in a window of ours.
+        //
+        // This is the whole transport people asked for — a scrubber, and fifteen seconds
+        // back — and macOS already draws it, on the lock screen, in Control Center, on a
+        // paired set of AirPods, and under the media keys, which is where Apple Podcasts
+        // puts exactly these two commands. Reading a long article is the case that wants
+        // them, and it is the case where you are not looking at the screen.
+        commandCenter.skipBackwardCommand.preferredIntervals = [NSNumber(value: Self.skipSeconds)]
+        commandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: Self.skipSeconds)]
+        enable(commandCenter.skipBackwardCommand) { [weak self] in
+            self?.onSkip?(-Self.skipSeconds)
+        }
+        enable(commandCenter.skipForwardCommand) { [weak self] in
+            self?.onSkip?(Self.skipSeconds)
+        }
+        commandCenter.changePlaybackPositionCommand.isEnabled = true
+        commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else {
+                return .commandFailed
+            }
+            self?.onScrub?(event.positionTime)
+            return .success
+        }
+
+        // Track skipping is still nothing: there is one article, not a playlist, and a
+        // control that does nothing reads as a broken app rather than a small one.
         for unsupported in [commandCenter.nextTrackCommand,
                             commandCenter.previousTrackCommand,
                             commandCenter.seekForwardCommand,
-                            commandCenter.seekBackwardCommand,
-                            commandCenter.changePlaybackPositionCommand] {
+                            commandCenter.seekBackwardCommand] {
             unsupported.isEnabled = false
         }
-        AppLog.write("now playing: remote commands installed")
+        AppLog.write("now playing: remote commands installed "
+                     + "(play/pause, stop, scrub, ±\(Int(Self.skipSeconds))s)")
     }
 
     /// Announces a new utterance. The title is a short prefix of the text being read, so
@@ -58,9 +94,30 @@ final class NowPlayingController {
             MPMediaItemPropertyTitle: title,
             MPMediaItemPropertyArtist: "MoxSpeak",
             MPNowPlayingInfoPropertyPlaybackRate: NSNumber(value: rate),
-            MPNowPlayingInfoPropertyIsLiveStream: NSNumber(value: true),
+            MPMediaItemPropertyPlaybackDuration: NSNumber(value: 0.0),
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: NSNumber(value: 0.0),
         ]
         infoCenter.playbackState = .playing
+    }
+
+    /// Updates the timeline. Called on a slow timer while something is being read.
+    ///
+    /// `isLiveStream` used to be set here, and it is why there was no transport at all:
+    /// a live stream has no duration by definition, so the system drew a title and a
+    /// play button and nothing else. Reading is not a live stream — it has a known
+    /// length and a position inside it — and saying so is the entire feature.
+    ///
+    /// Duration grows while synthesis is still running, because the engine reports what
+    /// it actually holds rather than a prediction. Synthesis outruns playback by roughly
+    /// an order of magnitude, so it settles a second or two in.
+    func setProgress(elapsed: TimeInterval, duration: TimeInterval, rate: Float) {
+        guard infoCenter.nowPlayingInfo != nil, duration > 0 else { return }
+        infoCenter.nowPlayingInfo?[MPMediaItemPropertyPlaybackDuration] =
+            NSNumber(value: duration)
+        infoCenter.nowPlayingInfo?[MPNowPlayingInfoPropertyElapsedPlaybackTime] =
+            NSNumber(value: elapsed)
+        infoCenter.nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] =
+            NSNumber(value: rate)
     }
 
     func setPaused(_ paused: Bool) {

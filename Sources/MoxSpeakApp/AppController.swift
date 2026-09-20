@@ -47,6 +47,9 @@ final class AppController {
     /// exactly as simple as it sounds.
     private var engine: PlaybackEngine?
     private var playback: Task<Void, Never>?
+    /// Drives the Now Playing timeline while something is being read. See
+    /// `startProgressUpdates`.
+    private var progressTimer: Timer?
 
     /// Rebuilt per engine: what counts as slow, and what a user could do about it, are
     /// both engine-specific. See `EngineChoice.slowThreshold`.
@@ -142,6 +145,8 @@ final class AppController {
 
         nowPlaying.onTogglePlayPause = { [weak self] in self?.togglePause() }
         nowPlaying.onStop = { [weak self] in self?.stop() }
+        nowPlaying.onSkip = { [weak self] seconds in self?.skip(by: seconds) }
+        nowPlaying.onScrub = { [weak self] position in self?.seek(to: position) }
         nowPlaying.activate()
 
         Telemetry.start(settings: settings)
@@ -315,6 +320,48 @@ final class AppController {
         case .pause: return { [weak self] in self?.togglePause() }
         case .stop: return { [weak self] in self?.stop() }
         }
+    }
+
+    // MARK: - Transport
+
+    /// Moves by a relative amount, from the media keys or the Control Center buttons.
+    func skip(by seconds: Double) {
+        guard let engine else { return }
+        seek(to: engine.elapsed + seconds)
+    }
+
+    /// Moves to an absolute position, from dragging the scrubber.
+    func seek(to position: TimeInterval) {
+        guard let engine, engine.duration > 0 else { return }
+        engine.seek(to: position)
+        AppLog.write(String(format: "transport: moved to %.1fs of %.1fs",
+                            engine.elapsed, engine.duration))
+        publishProgress()
+    }
+
+    /// Pushes the position into Now Playing.
+    ///
+    /// A timer rather than a callback per buffer: the system extrapolates between updates
+    /// using the playback rate, so it only needs correcting occasionally, and a render
+    /// thread has no business touching MPNowPlayingInfoCenter.
+    private func startProgressUpdates() {
+        progressTimer?.invalidate()
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.publishProgress() }
+        }
+        publishProgress()
+    }
+
+    private func stopProgressUpdates() {
+        progressTimer?.invalidate()
+        progressTimer = nil
+    }
+
+    private func publishProgress() {
+        guard let engine, engine.duration > 0 else { return }
+        nowPlaying.setProgress(elapsed: engine.elapsed,
+                               duration: engine.duration,
+                               rate: engine.isPaused ? 0 : engine.rate)
     }
 
     // MARK: - Rebinding
@@ -644,6 +691,7 @@ final class AppController {
         case .speakText(let text): speak(text)
         case .pause: togglePause()
         case .stop: stop()
+        case .skip(let seconds): skip(by: seconds)
         }
     }
 
@@ -706,6 +754,7 @@ final class AppController {
         self.engine = engine
         isPlaying = true
         nowPlaying.beginPlaying(title: NowPlayingController.title(for: text), rate: rate)
+        startProgressUpdates()
         refresh()
         AppLog.write("speak: \(text.count) characters in \(voice) at \(rate)× "
                      + "on the \(engineChoice.logName) engine")
@@ -957,6 +1006,7 @@ final class AppController {
         AppLog.write("speak: finished \(chunkCount) chunk\(chunkCount == 1 ? "" : "s"), "
                      + "\(failures.count) failed, heard something: \(heardAnything)")
         isPlaying = false
+        stopProgressUpdates()
         engine?.stop()
         engine = nil
         playback = nil
@@ -1002,6 +1052,7 @@ final class AppController {
         engine?.stop()
         engine = nil
         isPlaying = false
+        stopProgressUpdates()
         // Fire-and-forget by design: `SpeechSession.speak` bumps the generation
         // synchronously, so stale work is discarded whether or not this has landed yet,
         // and awaiting it here would put an unwinding network call on the hotkey path.
@@ -1012,6 +1063,7 @@ final class AppController {
     private func report(_ message: String) {
         lastError = message
         isPlaying = false
+        stopProgressUpdates()
         refresh()
         AppLog.write("error: \(message)")
     }

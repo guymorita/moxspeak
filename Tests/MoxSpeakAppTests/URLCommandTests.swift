@@ -27,6 +27,21 @@ import Testing
         #expect(Self.parse("MoxSpeak://SPEAK") == .speak)
     }
 
+    /// Launchers get the same fifteen seconds the media keys move by, without spending
+    /// a global shortcut on it.
+    @MainActor
+    @Test func skippingMatchesTheMediaKeys() {
+        #expect(Self.parse("moxspeak://back") == .skip(seconds: -15))
+        #expect(Self.parse("moxspeak://rewind") == .skip(seconds: -15))
+        #expect(Self.parse("moxspeak://forward") == .skip(seconds: 15))
+        #expect(Self.parse("moxspeak://skip?seconds=30") == .skip(seconds: 30))
+        #expect(Self.parse("moxspeak://skip?seconds=-45") == .skip(seconds: -45))
+        // One skip distance, not two. The URL and the media key must agree.
+        #expect(URLCommand.defaultSkip == NowPlayingController.skipSeconds)
+        // Skipping acts on what is already playing, so it has no reason to wait.
+        #expect(URLCommand.skip(seconds: -15).focusSettlingDelay == 0)
+    }
+
     @Test func textCanBeSuppliedDirectly() {
         #expect(Self.parse("moxspeak://speak?text=hello%20there")
                 == .speakText("hello there"))

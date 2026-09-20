@@ -26,8 +26,16 @@ enum URLCommand: Equatable {
     case speakText(String)
     case pause
     case stop
+    /// Move by a relative amount. Negative goes back. Launchers get the same fifteen
+    /// seconds the media keys do, without spending a global shortcut on it.
+    case skip(seconds: Double)
 
     static let scheme = "moxspeak"
+
+    /// Matches `NowPlayingController.skipSeconds`, so the URL and the media key move by
+    /// the same amount. Two different "skip" distances in one app would be a bug nobody
+    /// could describe.
+    static let defaultSkip: Double = 15
 
     /// Parses a URL, or returns nil for anything this does not recognise.
     ///
@@ -64,6 +72,13 @@ enum URLCommand: Equatable {
             self = .pause
         case "stop":
             self = .stop
+        case "back", "rewind":
+            self = .skip(seconds: -Self.defaultSkip)
+        case "forward", "skip":
+            let requested = components.queryItems?
+                .first { $0.name.lowercased() == "seconds" }?
+                .value.flatMap(Double.init)
+            self = .skip(seconds: requested ?? Self.defaultSkip)
         default:
             return nil
         }
@@ -81,7 +96,7 @@ enum URLCommand: Equatable {
     var focusSettlingDelay: TimeInterval {
         switch self {
         case .speak: return 0.25
-        case .speakText, .pause, .stop: return 0
+        case .speakText, .pause, .stop, .skip: return 0
         }
     }
 
@@ -91,6 +106,8 @@ enum URLCommand: Equatable {
         case .speakText(let text): return "speak \(text.count) characters of supplied text"
         case .pause: return "pause"
         case .stop: return "stop"
+        case .skip(let seconds):
+            return "skip \(seconds > 0 ? "forward" : "back") \(abs(Int(seconds)))s"
         }
     }
 }

@@ -25,11 +25,40 @@ import AVFoundation
 public final class PlaybackEngine {
 
     /// Thread-safe because the completion handler fires on an AVAudioEngine thread.
+    ///
+    /// Carries a generation as well as a count. Seeking throws away buffers that were
+    /// scheduled and never played, and `AVAudioPlayerNode` still runs their completion
+    /// handlers — so without a generation those handlers would decrement a count that had
+    /// already been reset for the new position, drive it negative, and make
+    /// `waitForDrain` return while audio was still playing. Handlers stamped with a stale
+    /// generation are ignored instead.
     private final class PendingCount: @unchecked Sendable {
         private let lock = NSLock()
         private var value = 0
-        func increment() { lock.lock(); value += 1; lock.unlock() }
-        func decrement() { lock.lock(); value -= 1; lock.unlock() }
+        private var generation = 0
+
+        /// Registers one scheduled buffer and returns the generation to stamp it with.
+        func increment() -> Int {
+            lock.lock(); defer { lock.unlock() }
+            value += 1
+            return generation
+        }
+
+        func decrement(generation stamp: Int) {
+            lock.lock(); defer { lock.unlock() }
+            guard stamp == generation else { return }
+            value -= 1
+        }
+
+        /// Discards everything outstanding. Returns the new generation.
+        @discardableResult
+        func reset() -> Int {
+            lock.lock(); defer { lock.unlock() }
+            generation += 1
+            value = 0
+            return generation
+        }
+
         var current: Int { lock.lock(); defer { lock.unlock() }; return value }
     }
 
@@ -39,6 +68,25 @@ public final class PlaybackEngine {
     private let format: AudioFormat
     private let processingFormat: AVAudioFormat
     private let pending = PendingCount()
+
+    /// Everything handed to `enqueue`, in order, kept so a seek can re-schedule from an
+    /// arbitrary point. `AVAudioPlayerNode` has no notion of a position to seek to: the
+    /// only way to play from the middle is to stop it and schedule the tail again.
+    private var timeline: [AVAudioPCMBuffer] = []
+
+    /// Source frame at which each timeline buffer starts. `starts[i] + timeline[i].count`
+    /// is where the next one begins, so a frame maps to a buffer by binary search.
+    private var starts: [AVAudioFramePosition] = []
+
+    /// Total frames enqueued so far. Grows while synthesis is still running: the engine
+    /// reports the duration it actually holds rather than a prediction, which is
+    /// self-correcting and, because synthesis runs many times faster than playback,
+    /// settles within a second or two of starting.
+    public private(set) var totalFrames: AVAudioFramePosition = 0
+
+    /// The source frame the player node's own sample time zero corresponds to. Moves on
+    /// every seek, because stopping the node resets its clock.
+    private var baseFrame: AVAudioFramePosition = 0
 
     public init(format: AudioFormat) throws {
         // Reject up front anything `buffer(from:)` cannot decode. Without this the engine
@@ -137,9 +185,17 @@ public final class PlaybackEngine {
                 "cannot decode \(data.count) bytes as PCM: expected a non-zero multiple of "
                 + "\(bytesPerFrame) bytes per frame")
         }
-        pending.increment()
+        starts.append(totalFrames)
+        timeline.append(buffer)
+        totalFrames += AVAudioFramePosition(buffer.frameLength)
+        schedule(buffer)
+    }
+
+    private func schedule(_ buffer: AVAudioPCMBuffer) {
+        let generation = pending.increment()
         player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack,
-                              completionHandler: Self.decrementHandler(for: pending))
+                              completionHandler: Self.decrementHandler(for: pending,
+                                                                       generation: generation))
     }
 
     /// Builds the buffer-completion handler outside any actor.
@@ -153,15 +209,111 @@ public final class PlaybackEngine {
     /// only `PendingCount`, which is `NSLock`-protected precisely because it is the one
     /// piece of this class that legitimately lives on the audio thread.
     private nonisolated static func decrementHandler(
-        for pending: PendingCount
+        for pending: PendingCount, generation: Int
     ) -> AVAudioPlayerNodeCompletionHandler {
-        { _ in pending.decrement() }
+        { _ in pending.decrement(generation: generation) }
     }
 
     public func stop() {
         player.stop()
         engine.stop()
         isPaused = false
+        pending.reset()
+        timeline.removeAll()
+        starts.removeAll()
+        totalFrames = 0
+        baseFrame = 0
+    }
+
+    // MARK: - Position and seeking
+
+    /// Seconds of audio enqueued so far, in the source timeline — unaffected by `rate`,
+    /// because a listener scrubbing a two-minute article expects two minutes whatever
+    /// speed it is being read at. `MPNowPlayingInfoCenter` wants it in these terms too,
+    /// and applies the rate itself.
+    public var duration: TimeInterval {
+        Double(totalFrames) / format.sampleRate
+    }
+
+    public var elapsed: TimeInterval {
+        Double(elapsedFrames) / format.sampleRate
+    }
+
+    private var elapsedFrames: AVAudioFramePosition {
+        guard let nodeTime = player.lastRenderTime,
+              let playerTime = player.playerTime(forNodeTime: nodeTime)
+        else { return baseFrame }
+        // sampleTime reads negative before the node has rendered anything.
+        return min(max(baseFrame, baseFrame + playerTime.sampleTime), totalFrames)
+    }
+
+    /// Plays from `time`, clamped to what has actually been enqueued.
+    ///
+    /// Stops the node, throws away its queue and schedules the remainder of the timeline
+    /// from the target — the partial buffer containing it first, then whole buffers after.
+    /// That is the only way to move an `AVAudioPlayerNode`: it has no seek.
+    ///
+    /// Seeking while paused stays paused, and lands where it was asked to. Somebody who
+    /// pauses, drags the scrubber, then presses play expects the drag to have taken.
+    public func seek(to time: TimeInterval) {
+        guard !timeline.isEmpty else { return }
+        let target = min(max(0, AVAudioFramePosition(time * format.sampleRate)), totalFrames)
+
+        let wasPaused = isPaused
+        player.stop()
+        pending.reset()
+        baseFrame = target
+
+        // Everything at or after the target. The first one usually starts before it, so
+        // it is sliced; the rest go whole.
+        var index = timeline.count
+        for i in timeline.indices where starts[i] + AVAudioFramePosition(timeline[i].frameLength) > target {
+            index = i
+            break
+        }
+        if index < timeline.count {
+            let offset = target - starts[index]
+            if offset > 0 {
+                if let tail = Self.slice(timeline[index], from: AVAudioFrameCount(offset)) {
+                    schedule(tail)
+                }
+                index += 1
+            }
+        }
+        for buffer in timeline[min(index, timeline.count)...] { schedule(buffer) }
+
+        // Only touch the node's transport when there is a running engine behind it.
+        // `AVAudioPlayerNode.play()` aborts the process outright if the engine is not
+        // running, and a seek can perfectly well arrive before playback has started — a
+        // scrubber dragged during the pause between pressing the shortcut and the first
+        // chunk arriving, or a skip-back on a reading that has already finished.
+        guard engine.isRunning else { return }
+        if wasPaused {
+            // `stop()` cleared the node's paused state; put it back, so the transport
+            // still reads as paused and `resume()` is what starts it.
+            player.play()
+            player.pause()
+            isPaused = true
+        } else {
+            player.play()
+        }
+    }
+
+    /// The tail of a buffer from `frame` onwards, or nil when there is nothing left.
+    nonisolated static func slice(_ buffer: AVAudioPCMBuffer,
+                                  from frame: AVAudioFrameCount) -> AVAudioPCMBuffer? {
+        guard frame < buffer.frameLength,
+              let out = AVAudioPCMBuffer(pcmFormat: buffer.format,
+                                         frameCapacity: buffer.frameLength - frame),
+              let source = buffer.floatChannelData,
+              let destination = out.floatChannelData
+        else { return nil }
+        let count = Int(buffer.frameLength - frame)
+        for channel in 0..<Int(buffer.format.channelCount) {
+            destination[channel].update(from: source[channel] + Int(frame), count: count)
+        }
+        out.frameLength = buffer.frameLength - frame
+        return out
     }
 
     /// Waits until everything scheduled has actually been heard, not merely handed to
