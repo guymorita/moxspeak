@@ -33,12 +33,16 @@ struct Settings {
         static let voice = "voice"
         static let rate = "rate"
         static let engine = "engine"
+        static let hasCompletedFirstRun = "hasCompletedFirstRun"
+        static let telemetryEnabled = "telemetryEnabled"
+        static let installID = "installID"
     }
 
     /// Every key this app writes, in one place, because `Reset` has to be able to check
     /// that they are all gone — and a key added to `Key` without being added here would
     /// be a preference that silently survives a reset.
-    static let allKeys = [Key.voice, Key.rate, Key.engine]
+    static let allKeys = [Key.voice, Key.rate, Key.engine,
+                          Key.hasCompletedFirstRun, Key.telemetryEnabled, Key.installID]
                        + HotkeyAction.allCases.map(\.settingsKey)
 
     /// `.standard` is the bundle identifier's own suite — `com.moxspeak.menubar` — which
@@ -64,6 +68,54 @@ struct Settings {
     /// The store behind these settings. Exposed for `Reset`, which has to empty the same
     /// `UserDefaults` this writes to rather than assume `.standard`.
     var store: UserDefaults { defaults }
+
+    // MARK: - First run
+
+    /// False exactly once per install: on the very first launch, before the welcome
+    /// window has been dismissed.
+    ///
+    /// Written when the window is dismissed rather than when it is shown, so a first
+    /// launch that crashes or is force-quit mid-welcome shows it again rather than
+    /// leaving somebody with a menu bar app they never learned to use.
+    ///
+    /// `nonmutating` because nothing in `Settings` itself changes — the write lands in
+    /// `UserDefaults`, which is a reference type. Without it, every holder of a `Settings`
+    /// would have to keep it in a `var` just to record a fact about the user.
+    var hasCompletedFirstRun: Bool {
+        get { defaults.bool(forKey: Key.hasCompletedFirstRun) }
+        nonmutating set { defaults.set(newValue, forKey: Key.hasCompletedFirstRun) }
+    }
+
+    // MARK: - Telemetry
+
+    /// Whether anonymous usage events and crash reports may be sent. On by default,
+    /// stated on the welcome window, switchable under Advanced.
+    ///
+    /// `object(forKey:)` rather than `bool(forKey:)` because `bool` cannot tell "never
+    /// set" from "set to false", and the two have opposite meanings here: an unset value
+    /// is a fresh install that has consented by default, and false is somebody who went
+    /// and turned it off. Reading it as `bool` would silently re-enable telemetry for
+    /// every user who opted out, on the next launch.
+    var isTelemetryEnabled: Bool {
+        get { defaults.object(forKey: Key.telemetryEnabled) as? Bool ?? true }
+        nonmutating set { defaults.set(newValue, forKey: Key.telemetryEnabled) }
+    }
+
+    /// A random identifier for this installation, made on first use.
+    ///
+    /// Random rather than derived from anything about the machine — no serial number, no
+    /// hardware UUID, no MAC address, nothing that could identify the same person across
+    /// a reinstall or correlate with another product. "Reset MoxSpeak…" clears it, and
+    /// the next launch is a new install as far as any analytics is concerned, which is
+    /// the behaviour somebody clicking reset is entitled to expect.
+    func installID() -> String {
+        if let existing = defaults.string(forKey: Key.installID), !existing.isEmpty {
+            return existing
+        }
+        let fresh = UUID().uuidString
+        defaults.set(fresh, forKey: Key.installID)
+        return fresh
+    }
 
     // MARK: - Storing
 

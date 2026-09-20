@@ -73,6 +73,9 @@ import Foundation
         settings.storedVoice = "af_bella"
         settings.storedRate = 1.5
         settings.storedEngine = "http"
+        settings.hasCompletedFirstRun = true
+        settings.isTelemetryEnabled = false
+        _ = settings.installID()
         for action in HotkeyAction.allCases {
             settings.setStoredHotkey(action.defaultHotkey.storageString, for: action)
         }
@@ -219,4 +222,44 @@ private func withTemporaryFile(containing contents: String, _ body: (URL) -> Voi
     try? contents.write(to: url, atomically: true, encoding: .utf8)
     defer { try? FileManager.default.removeItem(at: url) }
     body(url)
+}
+
+/// Opting out has to survive a relaunch, and the obvious implementation does not.
+///
+/// `UserDefaults.bool(forKey:)` returns false both for "the user turned this off" and for
+/// "nobody has ever set this", and those mean opposite things here — an unset value is a
+/// fresh install that is on by default. Reading it as `bool` would silently switch
+/// telemetry back on for every person who had turned it off, on their very next launch,
+/// and nothing would ever report it.
+@Test func turningTelemetryOffSurvivesARelaunch() {
+    withTemporaryDefaults { defaults, domain in
+        let settings = Settings(defaults: defaults, domain: domain)
+        #expect(settings.isTelemetryEnabled, "a fresh install is on by default")
+
+        settings.isTelemetryEnabled = false
+        let relaunched = Settings(defaults: defaults, domain: domain)
+        #expect(relaunched.isTelemetryEnabled == false, "the opt-out did not survive")
+
+        relaunched.isTelemetryEnabled = true
+        #expect(Settings(defaults: defaults, domain: domain).isTelemetryEnabled)
+    }
+}
+
+/// The install identifier must be stable across launches, and must not be derived from
+/// anything about the machine. Resetting is a new install, which is what somebody who
+/// clicked reset is entitled to expect.
+@Test func theInstallIdentifierIsStableRandomAndResettable() {
+    withTemporaryDefaults { defaults, domain in
+        let settings = Settings(defaults: defaults, domain: domain)
+        let first = settings.installID()
+        #expect(!first.isEmpty)
+        #expect(settings.installID() == first, "it changed between two reads")
+        #expect(Settings(defaults: defaults, domain: domain).installID() == first,
+                "it did not survive a relaunch")
+        #expect(UUID(uuidString: first) != nil, "not a random UUID")
+
+        _ = Reset.erasePreferences(in: defaults, domain: domain)
+        let afterReset = Settings(defaults: defaults, domain: domain).installID()
+        #expect(afterReset != first, "reset left the same identity in place")
+    }
 }

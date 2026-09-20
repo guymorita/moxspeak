@@ -35,6 +35,9 @@ final class AppController {
     /// does anything.
     private var hotkeyBindings: [HotkeyAction: Hotkey] = [:]
     private var shortcuts: ShortcutsWindowController?
+    /// Held for the life of the app rather than the life of the window: it is shown once
+    /// and then never again, but it must not be deallocated while it is on screen.
+    private var welcome: WelcomeWindowController?
 
     /// A fresh `PlaybackEngine` per utterance rather than one reused for the app's
     /// lifetime. `AVAudioPlayerNode.stop()` and the pending-buffer count that
@@ -123,6 +126,12 @@ final class AppController {
         nowPlaying.activate()
 
         refresh()
+        // Deferred a turn: AppKit has not placed the status item in the menu bar yet at
+        // this point, so asking where it is now gives an answer that is wrong rather than
+        // missing. `statusItemFrame` refuses to return a frame that is not in the menu
+        // bar, so the worst case here is a sensible fallback rather than a window in the
+        // wrong corner — but waiting means the common case is right.
+        DispatchQueue.main.async { [weak self] in self?.showWelcomeIfFirstRun() }
         AppLog.write("app: started on the \(engineChoice.logName) engine — "
                      + "\(engineChoice.menuTitle(port: port))")
         AppLog.write("settings: restored voice \(voice) at \(rate)× "
@@ -130,6 +139,46 @@ final class AppController {
                      + "voice=\(settings.storedVoice ?? "none"), "
                      + "speed=\(settings.storedRate.map { "\($0)" } ?? "none"))")
         beginEngine()
+    }
+
+    /// Shows the welcome window the first time MoxSpeak is opened, and never again.
+    ///
+    /// The flag is written when the window closes rather than when it opens: a first
+    /// launch that is force-quit part way through should get another go, not leave
+    /// somebody holding a menu bar app whose shortcut they never learned.
+    private func showWelcomeIfFirstRun() {
+        guard !settings.hasCompletedFirstRun else { return }
+        // `LSUIElement` apps launch without activating, so a window shown here would open
+        // behind whatever the user is looking at. Becoming a regular app for the duration
+        // puts it in front — and returns to accessory afterwards, because a Dock icon is
+        // exactly what this app promises not to have.
+        NSApp.setActivationPolicy(.regular)
+        let controller = WelcomeWindowController(
+            shortcutLabel: hotkeyBindings[.speak]?.label ?? HotkeyAction.speak.defaultHotkey.label,
+            actions: .init(
+                requestAccessibility: {
+                    SelectionReader.requestPermission()
+                    return SelectionReader.isTrusted
+                },
+                isAccessibilityTrusted: { SelectionReader.isTrusted },
+                finish: { [weak self] launchAtLogin in
+                    self?.finishFirstRun(launchAtLogin: launchAtLogin)
+                }))
+        welcome = controller
+        controller.show(under: menuBar?.statusItemFrame)
+        AppLog.write("welcome: first launch — showing the welcome window")
+    }
+
+    private func finishFirstRun(launchAtLogin: Bool) {
+        settings.hasCompletedFirstRun = true
+        NSApp.setActivationPolicy(.accessory)
+        if LaunchAtLogin.isAvailable {
+            let settled = LaunchAtLogin.set(launchAtLogin)
+            AppLog.write("welcome: launch at login \(launchAtLogin ? "on" : "off")"
+                         + (settled ? "" : " — the system did not accept it"))
+        }
+        refreshSelectToSpeak()
+        AppLog.write("welcome: finished — accessibility=\(SelectionReader.isTrusted)")
     }
 
     /// Registers all three shortcuts, resolving each against what was stored first.

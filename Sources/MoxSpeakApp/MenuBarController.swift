@@ -45,6 +45,32 @@ final class MenuBarController: NSObject {
 
     private let actions: Actions
     private let statusItem: NSStatusItem
+
+    /// Where the gemstone actually is on screen, so the welcome window can be anchored
+    /// under it — or nil when that cannot be answered honestly.
+    ///
+    /// The nil cases are the point. A status item's button has a window from the moment
+    /// it is created, but AppKit has not yet placed it in the menu bar, and converting
+    /// through an unplaced window returns a plausible-looking rectangle that is simply
+    /// wrong: measured at launch it reported `(0, -33.5, 34, 31)` — off the bottom-left
+    /// of a screen whose menu bar is at the top — and a caller that trusted it put the
+    /// welcome window in the corner of the screen furthest from the icon it was pointing
+    /// at. So the frame is checked against the one thing that must be true of a menu bar
+    /// item: it sits in the strip above the visible frame. Anything else is nil, and the
+    /// caller falls back to the top-right corner, which is where the menu bar is anyway.
+    var statusItemFrame: CGRect? {
+        guard let button = statusItem.button, let window = button.window else { return nil }
+        let frame = window.convertToScreen(button.convert(button.bounds, to: nil))
+        guard let screen = window.screen ?? NSScreen.main else { return nil }
+        // The menu bar occupies the gap between the screen's full frame and its visible
+        // frame. An item genuinely in the menu bar has its bottom edge at or above the
+        // top of the visible area, and lies within the screen horizontally.
+        guard frame.minY >= screen.visibleFrame.maxY - 1,
+              frame.maxY <= screen.frame.maxY + 1,
+              frame.minX >= screen.frame.minX, frame.maxX <= screen.frame.maxX
+        else { return nil }
+        return frame
+    }
     private let menu = NSMenu()
 
     private let statusLineItem = NSMenuItem()
