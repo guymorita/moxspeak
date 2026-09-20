@@ -76,6 +76,7 @@ import Foundation
         settings.hasCompletedFirstRun = true
         settings.isTelemetryEnabled = false
         _ = settings.installID()
+        settings.lastUpdateCheck = Date()
         for action in HotkeyAction.allCases {
             settings.setStoredHotkey(action.defaultHotkey.storageString, for: action)
         }

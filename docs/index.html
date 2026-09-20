@@ -185,7 +185,7 @@
   <img src="icon.png" alt="MoxSpeak icon: a blue gemstone with sound waves">
   <h1>MoxSpeak</h1>
   <p class="tagline">Select text anywhere. Press ⌃⌥S. Hear it.</p>
-  <p class="sub">A good voice, running on your own Mac. No server, no account, no network.</p>
+  <p class="sub">Works without an internet connection. Nothing to sign up for.</p>
 
   <div class="cta">
     <!-- Straight to the file, not to the release page. GitHub's /releases/latest/download/
@@ -242,32 +242,6 @@
 <section>
   <h2>Questions</h2>
 
-  <details id="privacy">
-    <summary>What does MoxSpeak send, and what does it not?</summary>
-    <p><strong>Never leaves your Mac:</strong> the text you select, your clipboard, file
-    paths, document or window titles, URLs, your name, your email, your IP address, or a
-    list of the apps you use. Speech is synthesized locally. There is no speech API and no
-    server.</p>
-    <p><strong>Sent, unless you switch it off:</strong> crash reports, and a short list of
-    usage events such as the app launching or speech starting and finishing. With them go
-    the app version, your macOS version, and the Mac model generation (for example
-    <code>Mac14,12</code>, shared by every unit of that machine). Length is reported as a
-    coarse band like "under 200 characters", never the exact count, which would be close
-    to a fingerprint for a particular document. When a read <em>fails</em>, the bundle id
-    of the app it failed in goes too, because that is the compatibility backlog in one
-    field. It is never sent when a read succeeds, since a list of apps you used
-    successfully would be a record of what you read and when.</p>
-    <p>This is a list in the code rather than a policy. An attribute is sent only if its
-    name is on a fixed allowlist and its value is a short token; anything else is dropped.
-    See <a href="https://github.com/guymorita/moxspeak/blob/main/Sources/MoxSpeakApp/TelemetryPayload.swift">TelemetryPayload.swift</a>
-    and its <a href="https://github.com/guymorita/moxspeak/blob/main/Tests/MoxSpeakAppTests/TelemetryPayloadTests.swift">tests</a>,
-    which include an attempt to smuggle a sentence out under eight plausible field names
-    that has to fail.</p>
-    <p>Switch it off under <strong>Advanced → Send anonymous usage stats</strong>. With it
-    off the reporting library is never started, so nothing is collected or queued.
-    Identity is a random id made on your machine, not derived from any hardware id, and
-    <strong>Reset MoxSpeak</strong> clears it.</p>
-  </details>
 
   <details>
     <summary>Will it run on my Mac?</summary>
@@ -308,6 +282,18 @@
     <p>Source-available. You can read, build, modify and audit it; redistributing it is
     not permitted. It is public because you should not have to take anyone's word for
     what an app with Accessibility access does with it.</p>
+  </details>
+  <details id="privacy">
+    <summary>Is what I read private?</summary>
+    <p>Yes. The text you select never leaves your Mac. The voice runs on your own
+    machine, so there is nothing to send anywhere and no company on the other end of it.
+    The same goes for your clipboard, your files, and the names of the apps you use.</p>
+    <p>MoxSpeak does send anonymous crash reports and a count of things like "the app
+    launched" or "speech started", so bugs get fixed without anyone having to write in.
+    That is all it sends, it is not tied to you, and you can switch it off under
+    <strong>Advanced &rarr; Send anonymous usage stats</strong>. The full list is
+    <a href="https://github.com/guymorita/moxspeak/blob/main/Sources/MoxSpeakApp/TelemetryPayload.swift">in the source</a>
+    if you want to check rather than take my word for it.</p>
   </details>
 </section>
 

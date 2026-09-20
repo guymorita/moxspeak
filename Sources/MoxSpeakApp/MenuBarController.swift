@@ -36,6 +36,8 @@ final class MenuBarController: NSObject {
         /// Erase the two things MoxSpeak leaves outside its own bundle. Destructive, and
         /// confirmed by the controller before anything is touched — see `Reset`.
         var reset: @MainActor () -> Void
+        /// Open the page where a newer version can be downloaded.
+        var openDownloadPage: @MainActor () -> Void
         /// Whether MoxSpeak is set to open at login right now.
         var isLaunchAtLoginEnabled: @MainActor () -> Bool
         /// Turn the login item on or off.
@@ -97,6 +99,7 @@ final class MenuBarController: NSObject {
     private let selectToSpeakItem = NSMenuItem()
     private let resetItem = NSMenuItem()
     private let telemetryItem = NSMenuItem()
+    private let updateItem = NSMenuItem()
     private let loginItem = NSMenuItem()
     private let versionItem = NSMenuItem()
 
@@ -198,6 +201,15 @@ final class MenuBarController: NSObject {
         selectToSpeakItem.target = self
         menu.addItem(selectToSpeakItem)
         setSelectToSpeak(active: false)
+
+        // Hidden unless there is actually a newer release. An update row that is always
+        // present, greyed out and saying "up to date", is a permanent piece of furniture
+        // earning nothing; one that appears only when it has news is worth looking at.
+        updateItem.action = #selector(openDownloadPage)
+        updateItem.target = self
+        updateItem.isEnabled = true
+        updateItem.isHidden = true
+        menu.addItem(updateItem)
 
         menu.addItem(.separator())
 
@@ -590,6 +602,20 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func openPrivacy() { actions.openPrivacy() }
+
+    @objc private func openDownloadPage() { actions.openDownloadPage() }
+
+    /// Shows or hides the update row. Nil hides it, which is also how it starts, so a
+    /// failed or skipped check leaves the menu exactly as it was.
+    func setUpdateAvailable(_ version: String?) {
+        guard let version else {
+            updateItem.isHidden = true
+            return
+        }
+        updateItem.title = "Update to \(version)"
+        updateItem.toolTip = "Opens the download page. MoxSpeak does not update itself."
+        updateItem.isHidden = false
+    }
 
     /// Both ticks reflect what is actually in force, re-read each time the menu opens
     /// rather than remembered, so neither can drift from the setting it claims to show.

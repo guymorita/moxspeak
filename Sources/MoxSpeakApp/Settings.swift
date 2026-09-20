@@ -36,13 +36,15 @@ struct Settings {
         static let hasCompletedFirstRun = "hasCompletedFirstRun"
         static let telemetryEnabled = "telemetryEnabled"
         static let installID = "installID"
+        static let lastUpdateCheck = "lastUpdateCheck"
     }
 
     /// Every key this app writes, in one place, because `Reset` has to be able to check
     /// that they are all gone — and a key added to `Key` without being added here would
     /// be a preference that silently survives a reset.
     static let allKeys = [Key.voice, Key.rate, Key.engine,
-                          Key.hasCompletedFirstRun, Key.telemetryEnabled, Key.installID]
+                          Key.hasCompletedFirstRun, Key.telemetryEnabled, Key.installID,
+                          Key.lastUpdateCheck]
                        + HotkeyAction.allCases.map(\.settingsKey)
 
     /// `.standard` is the bundle identifier's own suite — `com.moxspeak.menubar` — which
@@ -115,6 +117,18 @@ struct Settings {
         let fresh = UUID().uuidString
         defaults.set(fresh, forKey: Key.installID)
         return fresh
+    }
+
+    // MARK: - Updates
+
+    /// When MoxSpeak last asked GitHub whether there was a newer release.
+    ///
+    /// Persisted rather than kept in memory because a menu bar app is launched rarely and
+    /// runs for weeks. Checking only at launch would mean never asking for exactly the
+    /// people most likely to be running an old build.
+    var lastUpdateCheck: Date? {
+        get { defaults.object(forKey: Key.lastUpdateCheck) as? Date }
+        nonmutating set { defaults.set(newValue, forKey: Key.lastUpdateCheck) }
     }
 
     // MARK: - Storing

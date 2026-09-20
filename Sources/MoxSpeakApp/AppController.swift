@@ -110,6 +110,7 @@ final class AppController {
             enableSelectToSpeak: { [weak self] in self?.enableSelectToSpeak() },
             openShortcuts: { [weak self] in self?.openShortcuts() },
             reset: { [weak self] in self?.resetEverything() },
+            openDownloadPage: { NSWorkspace.shared.open(UpdateCheck.downloadPage) },
             isLaunchAtLoginEnabled: { LaunchAtLogin.isEnabled },
             setLaunchAtLoginEnabled: { [weak self] on in
                 let settled = LaunchAtLogin.set(on)
@@ -144,6 +145,7 @@ final class AppController {
         nowPlaying.activate()
 
         Telemetry.start(settings: settings)
+        checkForUpdateIfDue()
         Telemetry.record(.appLaunched, [
             "engine": engineChoice.rawValue,
             "accessibility": SelectionReader.isTrusted,
@@ -165,6 +167,42 @@ final class AppController {
                      + "voice=\(settings.storedVoice ?? "none"), "
                      + "speed=\(settings.storedRate.map { "\($0)" } ?? "none"))")
         beginEngine()
+    }
+
+    /// Asks GitHub whether there is a newer release, at most once a day.
+    ///
+    /// Detached and unawaited: nothing about launching, speaking or the menu may wait on
+    /// a network call. Every failure path ends in silence — no alert, no retry, no row.
+    /// Somebody offline must not be able to tell that this ran.
+    ///
+    /// The timestamp is written before the request rather than after, so a check that
+    /// hangs or crashes the process cannot produce an app that asks GitHub on every
+    /// single launch forever.
+    private func checkForUpdateIfDue() {
+        let installed = AppVersion.read().shortVersion
+        guard installed != nil else { return }   // a `swift build` binary has no version
+        if let last = settings.lastUpdateCheck,
+           Date().timeIntervalSince(last) < UpdateCheck.interval {
+            return
+        }
+        settings.lastUpdateCheck = Date()
+
+        Task { [weak self] in
+            let latest = await UpdateCheck().latestRelease()
+            guard let update = UpdateCheck.update(installed: installed, latest: latest)
+            else {
+                if latest != nil {
+                    AppLog.write("update: \(installed ?? "?") is current (latest \(latest!))")
+                }
+                return
+            }
+            await MainActor.run {
+                guard let self else { return }
+                self.menuBar?.setUpdateAvailable(update.description)
+                AppLog.write("update: \(update) is available, running \(installed ?? "?")")
+                Telemetry.record(.updateOffered, ["app_version": installed ?? ""])
+            }
+        }
     }
 
     /// Shows the welcome window the first time MoxSpeak is opened, and never again.
