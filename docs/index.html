@@ -440,6 +440,28 @@
   </details>
 
   <details>
+    <summary>Can I control it while it's reading?</summary>
+    <p>Yes, and you do not need MoxSpeak's shortcuts for it. While something is being read
+    it appears in Control Center and on the lock screen with a real scrubber you can drag.
+    The <strong>⏪</strong> and <strong>⏩</strong> keys on your keyboard move back and
+    forward fifteen seconds, the same as a podcast player, and play/pause works from the
+    keyboard or a paired set of AirPods.</p>
+  </details>
+
+  <details>
+    <summary>Can I use it with Raycast, Alfred or Shortcuts?</summary>
+    <p>Yes. MoxSpeak answers a <code>moxspeak://</code> URL, so any launcher can drive it
+    without an extension to install:</p>
+    <p><code>open -g "moxspeak://speak"</code> reads the selection, and there are
+    <code>pause</code>, <code>stop</code>, <code>back</code> and <code>forward</code> too.
+    The <code>-g</code> matters: without it macOS brings MoxSpeak to the front and the
+    selection it goes looking for is its own.</p>
+    <p>Ready-made Raycast commands and setup notes for the rest are in
+    <a href="https://github.com/guymorita/moxspeak/tree/main/Integrations">Integrations</a>.
+    The built-in shortcuts keep working; this is an extra door.</p>
+  </details>
+
+  <details>
     <summary>Why is the download 170 MB?</summary>
     <p>The voice model is inside the app rather than downloaded on first launch. That is
     what makes it work offline, immediately, with nothing to configure.</p>
