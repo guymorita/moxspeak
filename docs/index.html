@@ -260,14 +260,42 @@
   p { margin: 0 0 14px; }
   .lead { color: var(--ink-soft); }
 
-  .facts { display: grid; gap: 1px; background: var(--edge); border: 1px solid var(--edge);
-           border-radius: 12px; overflow: hidden; margin: 22px 0; }
-  @media (min-width: 620px) { .facts { grid-template-columns: repeat(3, 1fr); } }
-  .fact { background: var(--panel); padding: 18px 16px; }
-  .fact .n { font-family: var(--display); font-size: 1.5rem; font-weight: 700;
-             display: block; line-height: 1.2; }
-  .fact .l { font-size: 0.85rem; color: var(--ink-faint); }
 
+  /* Five columns do not fit the 720px prose column, so this one table steps outside it:
+     centred on the viewport, wider than the text, capped so it never runs to the edges.
+     Below that width it scrolls sideways with the label column pinned, which keeps the
+     side-by-side reading that is the whole point of a comparison. */
+  .compare-wrap {
+    width: 100%; margin: 18px 0 8px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+  }
+  /* Step outside the prose column, but only when the window can spare it. Below 1000px
+     the table stays inside the column and scrolls sideways instead, so the breakout can
+     never be what pushes a phone layout wide. Content column is 720 - 48 = 672px, so
+     centring 920px costs (920 - 672) / 2 = 124px a side. */
+  @media (min-width: 1000px) {
+    .compare-wrap { width: 920px; margin-left: -124px; }
+  }
+  table.compare { min-width: 700px; margin: 0; table-layout: fixed; }
+  table.compare col.label { width: 150px; }
+  table.compare th, table.compare td {
+    vertical-align: top; font-size: 0.88rem; padding: 10px 14px;
+    text-transform: none; letter-spacing: 0;
+  }
+  table.compare thead th {
+    font-family: var(--display); font-size: 1rem; font-weight: 700; color: var(--ink);
+  }
+  table.compare tbody th {
+    text-align: left; font-weight: 600; font-size: 0.82rem; color: var(--ink-faint);
+    position: sticky; left: 0; background: var(--ground);
+  }
+  table.compare thead th:first-child { position: sticky; left: 0; background: var(--ground); }
+  /* Our column, tinted. Second child on every row, header and body alike. */
+  table.compare th:nth-child(2), table.compare td:nth-child(2) {
+    background: var(--gem-wash); color: var(--ink);
+  }
+  table.compare thead th:nth-child(2) { color: var(--gem-deep); }
+  .compare-note { font-size: 0.8rem; color: var(--ink-faint); margin: 4px 0 0; line-height: 1.5; }
   table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.95rem; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--edge); }
   th { font-weight: 600; font-size: 0.8rem; text-transform: uppercase;
@@ -370,15 +398,81 @@
     real time on a MacBook Air and sounds better than the premium voices Apple ships.
   </p>
   <p class="lead">
-    The whole model is inside the app. There is nothing to sign up for, and
-    nothing stops working on a plane.
+    The whole model is inside the app, with 29 voices. There is nothing to sign up for,
+    and nothing stops working on a plane.
+  </p>
+</section>
+
+<section>
+  <h2>The other ways to do this</h2>
+  <p class="lead">
+    ElevenLabs sounds better than everything here, including MoxSpeak. It also wants an
+    account and an internet connection. The rest is trade-offs.
   </p>
 
-  <div class="facts">
-    <div class="fact"><span class="n">0.3s</span><span class="l">to first sound</span></div>
-    <div class="fact"><span class="n">29</span><span class="l">voices included</span></div>
-    <div class="fact"><span class="n">0</span><span class="l">bytes of your text sent anywhere</span></div>
+  <div class="compare-wrap">
+  <table class="compare">
+    <colgroup><col class="label"><col><col><col><col></colgroup>
+    <thead>
+      <tr>
+        <th></th>
+        <th>MoxSpeak</th>
+        <th>macOS built-in</th>
+        <th>Kokoro FastAPI</th>
+        <th>ElevenLabs</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th>Cost</th>
+        <td>Free</td>
+        <td>Free</td>
+        <td>Free</td>
+        <td>Free to a limit, then monthly</td>
+      </tr>
+      <tr>
+        <th>How it sounds</th>
+        <td>Natural</td>
+        <td>Robotic</td>
+        <td>Same as MoxSpeak</td>
+        <td>Best on this list</td>
+      </tr>
+      <tr>
+        <th>Time to first sound</th>
+        <td>About a third of a second</td>
+        <td>Instant</td>
+        <td>Fast, once the server is up</td>
+        <td>A second or two</td>
+      </tr>
+      <tr>
+        <th>Getting started</th>
+        <td>Drag one app to Applications</td>
+        <td>Already there, switch it on</td>
+        <td>Docker, a server, and code to call it</td>
+        <td>Make an account</td>
+      </tr>
+      <tr>
+        <th>Works with no internet</th>
+        <td>Yes</td>
+        <td>Yes</td>
+        <td>Yes</td>
+        <td>No</td>
+      </tr>
+      <tr>
+        <th>Reads text in any app</th>
+        <td>Yes, press &#8963;&#8997;S</td>
+        <td>Yes, press &#8997;Esc</td>
+        <td>No, it is a server</td>
+        <td>Its own reader, and the web</td>
+      </tr>
+    </tbody>
+  </table>
   </div>
+  <p class="compare-note">
+    Time to first sound is the median of 30 real plays on an M-series MacBook; nine in ten
+    were under half a second. macOS does better than &#8220;robotic&#8221; if you download
+    one of Apple&#8217;s Siri voices in System Settings, but it still sounds synthetic.
+  </p>
 </section>
 
 <section>
