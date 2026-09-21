@@ -49,6 +49,10 @@ enum Telemetry {
     private static let dsn =
         "https://9a14cd510ce767ced5caed0b8baf3963@o4511264714915840.ingest.us.sentry.io/4512119819141120"
 
+    /// The only breadcrumb category that survives `beforeBreadcrumb`. Anything the SDK
+    /// records on its own carries a different one and is dropped.
+    static let breadcrumbCategory = "moxspeak"
+
     private static var isRunning = false
 
     // MARK: - Lifecycle
@@ -83,7 +87,20 @@ enum Telemetry {
 
             // See the file comment. Each of these is a deliberate no.
             options.sendDefaultPii = false
-            options.beforeBreadcrumb = { _ in nil }
+
+            // The SDK's automatic breadcrumbs are off, and a filter drops anything that
+            // is not ours even if a future default turns them back on.
+            //
+            // Dropping every breadcrumb, which is what this used to do, bought privacy at
+            // the cost of the one thing that makes a crash report actionable: what
+            // happened in the seconds before it. Automatic tracking is the part that is
+            // unsafe — it records window titles and menu text, which on a machine running
+            // MoxSpeak is the name of whatever somebody was reading. Our own breadcrumbs
+            // carry no content at all, only which code path ran.
+            options.enableAutoBreadcrumbTracking = false
+            options.beforeBreadcrumb = { crumb in
+                crumb.category == Self.breadcrumbCategory ? crumb : nil
+            }
             options.beforeSend = { event in scrub(event) }
             options.beforeSendLog = { log in log }
 
@@ -174,6 +191,32 @@ enum Telemetry {
         SentrySDK.flush(timeout: 10)
         print(String(format: "telemetry self-test: flush took %.2fs", Date().timeIntervalSince(start)))
         exit(0)
+    }
+
+    /// Records what the app just did, for the crash report that may follow.
+    ///
+    /// Never content. `message` is a fixed string chosen at the call site, and anything
+    /// variable goes through the same allowlist events do, so a breadcrumb cannot become
+    /// the back door through which the text being read escapes.
+    static func note(_ message: String, _ attributes: [String: Any] = [:]) {
+        guard isRunning else { return }
+        let crumb = Breadcrumb(level: .info, category: breadcrumbCategory)
+        crumb.message = message
+        let clean = TelemetryPayload.sanitize(attributes)
+        if !clean.isEmpty { crumb.data = clean }
+        SentrySDK.addBreadcrumb(crumb)
+    }
+
+    /// Facts about the session that a crash report should carry. Updated as they change,
+    /// so a report says which engine and voice were in use rather than only which build.
+    static func setContext(engine: String, voice: String, accessibility: Bool) {
+        guard isRunning else { return }
+        SentrySDK.configureScope { scope in
+            scope.setTag(value: engine, key: "engine")
+            scope.setTag(value: voice, key: "voice")
+            scope.setTag(value: accessibility ? "granted" : "not_granted",
+                         key: "accessibility")
+        }
     }
 
     // MARK: - Scrubbing

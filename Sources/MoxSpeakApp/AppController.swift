@@ -158,6 +158,10 @@ final class AppController {
             "voice": voice,
             "speed": Double(rate),
         ])
+        // Carried on every crash report, so one says which engine and voice were in use
+        // rather than only which build.
+        Telemetry.setContext(engine: engineChoice.rawValue, voice: voice,
+                             accessibility: SelectionReader.isTrusted)
 
         refresh()
         // Deferred a turn: AppKit has not placed the status item in the menu bar yet at
@@ -327,6 +331,7 @@ final class AppController {
     /// Moves by a relative amount, from the media keys or the Control Center buttons.
     func skip(by seconds: Double) {
         guard let engine else { return }
+        Telemetry.note("transport skip")
         seek(to: engine.elapsed + seconds)
     }
 
@@ -669,6 +674,7 @@ final class AppController {
     /// Acts on a `moxspeak://` URL. See `URLCommand` for why the scheme exists.
     func handle(_ command: URLCommand) {
         AppLog.write("url: \(command.logName)")
+        Telemetry.note("url command")
         // A launcher is still frontmost, and its window still dismissing, at the moment
         // it runs the command that sent us here. Reading the selection now asks Raycast
         // what Raycast has selected. Only the selection-reading case waits; see
@@ -983,12 +989,14 @@ final class AppController {
                     // rather than through a harness that skips playback.
                     AppLog.write(String(format: "speak: first sound after %.3fs on the %@ engine",
                                         elapsed, engineChoice.logName))
+                    Telemetry.note("first sound")
                     refresh()
                 }
                 do {
                     try engine.enqueue(data)
                 } catch {
                     failures.append("chunk \(chunk.id + 1): \(Self.describe(error))")
+                    Telemetry.note("chunk failed to enqueue")
                 }
             case .failed(let reason):
                 failures.append("chunk \(chunk.id + 1): \(Self.humanize(reason))")

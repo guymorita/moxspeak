@@ -300,6 +300,38 @@ if [ -n "${MOXSPEAK_NOTARIZE:-}" ]; then
     rm -rf "$(dirname "${NOTARIZE_ZIP}")"
 fi
 
+# --- debug symbols -----------------------------------------------------------------
+#
+# Without these a crash report from a release build is a list of memory addresses. The
+# binary is optimised and stripped of the mapping back to source, so Sentry shows frames
+# like `0x1042f8a1c` where the function name should be, and the report is unreadable
+# exactly when it matters.
+#
+# Needs an auth token, which is the one thing that cannot live in the repo:
+#
+#   sentry-cli login            # or: export SENTRY_AUTH_TOKEN=...
+#
+# Skipped without one rather than failing the build, because a local build has no reason
+# to upload anything — but a notarized build is a release, and a release with no symbols
+# is a release whose crashes cannot be read.
+if [ -n "${MOXSPEAK_NOTARIZE:-}" ]; then
+    if [ -z "${SENTRY_AUTH_TOKEN:-}" ] && [ ! -f "${HOME}/.sentryclirc" ]; then
+        echo "==> WARNING: no Sentry auth token, so debug symbols were NOT uploaded."
+        echo "    Crashes from this build will arrive as raw addresses."
+        echo "    Fix once with: sentry-cli login"
+    elif ! command -v sentry-cli >/dev/null 2>&1; then
+        echo "==> WARNING: sentry-cli not installed; debug symbols were NOT uploaded." >&2
+    else
+        echo "==> uploading debug symbols"
+        DSYM_DIR="$(swift build -c release --product MoxSpeakApp --show-bin-path)"
+        sentry-cli debug-files upload \
+            --org "${MOXSPEAK_SENTRY_ORG:-the-dude}" \
+            --project "${MOXSPEAK_SENTRY_PROJECT:-moxspeak}" \
+            "${DSYM_DIR}/MoxSpeakApp.dSYM" "${APP}/Contents/MacOS/${APP_NAME}" \
+            2>&1 | sed 's/^/    /' || echo "    upload failed; crashes will not symbolicate" >&2
+    fi
+fi
+
 # --- the disk image people download ------------------------------------------------
 #
 # Built after stapling so the app inside carries its own ticket, which is what lets a

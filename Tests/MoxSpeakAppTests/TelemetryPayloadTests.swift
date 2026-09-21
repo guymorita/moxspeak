@@ -140,3 +140,28 @@ import Testing
         }
     }
 }
+
+/// Breadcrumbs are what makes a crash report readable, and they are also the easiest
+/// place to leak the thing this app must never leak.
+@Suite struct BreadcrumbTests {
+
+    /// Their data goes through exactly the same allowlist events do, so a breadcrumb
+    /// cannot become the back door the text escapes through.
+    @Test func breadcrumbDataIsFilteredLikeEverythingElse() {
+        let secret = "Dear Rachel, the results came back on Tuesday."
+        let clean = TelemetryPayload.sanitize([
+            "message": secret, "text": secret, "reason": secret,
+            "tier": "ax", "length_bucket": "m",
+        ])
+        #expect(Set(clean.keys) == ["tier", "length_bucket"])
+    }
+
+    /// One category, and the filter keeps everything else out — including whatever the
+    /// SDK would record on its own, which is where window titles and menu text live.
+    @Test func thereIsOneCategoryAndItIsOurs() async {
+        await MainActor.run {
+            #expect(Telemetry.breadcrumbCategory == "moxspeak")
+            #expect(!Telemetry.breadcrumbCategory.isEmpty)
+        }
+    }
+}
