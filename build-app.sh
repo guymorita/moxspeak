@@ -86,6 +86,18 @@ if [[ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
 fi
 echo "==> version ${VERSION} (${BUILD_NUMBER}) · ${COMMIT_SHA}"
 
+# A dirty tree is fine for a local build and wrong for a release. Telemetry reads the
+# dirty marker as "this is a developer's machine" and files the build's crashes under
+# the `development` environment, so a release cut from an uncommitted tree reports its
+# users' crashes where nobody is looking for them. Found the hard way on 0.7.2, where
+# VERSION was bumped, built, and only then committed.
+if [[ "${MOXSPEAK_NOTARIZE:-0}" == "1" && "${COMMIT_SHA}" == *-dirty && "${MOXSPEAK_ALLOW_DIRTY:-0}" != "1" ]]; then
+  echo "==> refusing: a notarized release must be built from a committed tree." >&2
+  echo "    This build would report its crashes as 'development' and you would not see them." >&2
+  echo "    Commit (or stash) first, then rebuild. MOXSPEAK_ALLOW_DIRTY=1 overrides." >&2
+  exit 1
+fi
+
 echo "==> swift build -c release"
 swift build -c release --product MoxSpeakApp
 
