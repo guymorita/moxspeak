@@ -51,7 +51,11 @@ enum Telemetry {
 
     /// The only breadcrumb category that survives `beforeBreadcrumb`. Anything the SDK
     /// records on its own carries a different one and is dropped.
-    static let breadcrumbCategory = "moxspeak"
+    /// `nonisolated` because the SDK's filter has to read it from whatever queue built
+    /// the breadcrumb. It is an immutable String, so there is nothing to protect; leaving
+    /// it main-actor isolated is what made the filter closure a cross-actor access and
+    /// aborted the process on macOS 26+.
+    nonisolated static let breadcrumbCategory = "moxspeak"
 
     private static var isRunning = false
 
@@ -64,6 +68,10 @@ enum Telemetry {
         let installID = settings.installID()
         let version = AppVersion.read()
         let release = version.shortVersion ?? "0.0.0"
+        // Read here, on the main actor, and captured as a plain value. The closures below
+        // belong to the SDK and it calls them on whichever queue produced the event, so
+        // nothing inside them may touch this @MainActor type. See `beforeBreadcrumb`.
+        let ourCategory = Self.breadcrumbCategory
 
         SentrySDK.start { options in
             options.dsn = dsn
@@ -98,9 +106,39 @@ enum Telemetry {
             // MoxSpeak is the name of whatever somebody was reading. Our own breadcrumbs
             // carry no content at all, only which code path ran.
             options.enableAutoBreadcrumbTracking = false
+
+            // Swizzling off, and the three integrations that ride on it off by name.
+            //
+            // `enableAutoBreadcrumbTracking = false` does not cover these: network
+            // tracking is a separate integration that swizzles URLSession, and it kept
+            // recording a breadcrumb every time a request finished — including the
+            // update check, on every launch. Two consequences, one of them fatal:
+            //
+            // 1. The breadcrumb was built on CFNetwork's delegate queue, which is what
+            //    called `beforeBreadcrumb` off the main actor. See below.
+            // 2. A request breadcrumb carries the URL, which is automatic collection of
+            //    exactly the kind this app promises not to do.
+            //
+            // Nothing here is wanted. The app makes one network call, it is ours, and we
+            // record it ourselves if we want it recorded.
+            options.enableSwizzling = false
+            options.enableNetworkTracking = false
+            options.enableNetworkBreadcrumbs = false
+            options.enableCaptureFailedRequests = false
+
+            // `ourCategory`, not `Self.breadcrumbCategory`. Sentry calls this on whatever
+            // queue produced the breadcrumb, and `Telemetry` is @MainActor, so reading a
+            // static of it from here is a cross-actor access. Under Swift 5 mode the
+            // compiler allows it; the Swift 6 *runtime* on macOS 26 and later checks it
+            // anyway and aborts the process — `_swift_task_checkIsolatedSwift` ->
+            // `dispatch_assert_queue` -> SIGTRAP. It never fired on macOS 14 or 15, which
+            // is why this shipped: the crash reports came from other people's machines.
             options.beforeBreadcrumb = { crumb in
-                crumb.category == Self.breadcrumbCategory ? crumb : nil
+                crumb.category == ourCategory ? crumb : nil
             }
+            // Same rule: `scrub` is nonisolated precisely so this is safe. beforeSend runs
+            // on the SDK's own queue, and it runs while reporting a crash — the one moment
+            // a second crash is least welcome.
             options.beforeSend = { event in scrub(event) }
             options.beforeSendLog = { log in log }
 
@@ -224,7 +262,10 @@ enum Telemetry {
     /// The last gate before an event leaves. Everything here is already supposed to be
     /// off; doing it again means a future SDK default that starts collecting something
     /// cannot start shipping it without someone changing this file.
-    private static func scrub(_ event: Event) -> Event? {
+    /// `nonisolated` is load-bearing: the SDK calls this from `beforeSend`, on its own
+    /// queue. Nothing in the body touches actor-isolated state, so there is nothing to
+    /// hop for, and hopping is not an option anyway — `beforeSend` is synchronous.
+    nonisolated static func scrub(_ event: Event) -> Event? {
         event.request = nil
         if let user = event.user {
             user.ipAddress = nil
@@ -233,7 +274,13 @@ enum Telemetry {
             user.name = nil
             user.data = nil
         }
-        event.breadcrumbs = nil
+        // Breadcrumbs are deliberately *kept*. This line used to clear them, from when
+        // every breadcrumb was dropped at the source; once `beforeBreadcrumb` started
+        // admitting our own, clearing here quietly threw away the only record of what the
+        // app was doing before it died, which is the whole reason for collecting them.
+        // What survives to this point is ours by construction: a fixed message chosen at
+        // the call site plus allowlisted data. No automatic breadcrumb can reach here —
+        // swizzling is off and the category filter runs first.
         event.serverName = nil
         return event
     }
