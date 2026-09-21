@@ -60,6 +60,15 @@ final class MoxSpeakAppDelegate: NSObject, NSApplicationDelegate {
         // Before anything is registered. Two copies both claim ⌃⌥S, Carbon gives it to
         // whichever asked first, and the loser sits in the menu bar doing nothing.
         if SingleInstance.shouldYield() {
+            // Yielding is silent by design — a second copy launched by accident should
+            // not nag. A self-test is the exception: it runs later, inside AppController,
+            // so yielding here means it never runs, and exiting 0 with no output reads as
+            // "the test passed" when nothing was tested at all. Say so instead.
+            if ProcessInfo.processInfo.environment["MOXSPEAK_TELEMETRY_TEST"] == "1" {
+                print("telemetry self-test: NOT RUN — MoxSpeak is already running, and a "
+                      + "second copy yields before the test is reached. Quit MoxSpeak first.")
+                exit(1)
+            }
             NSApp.terminate(nil)
             return
         }
