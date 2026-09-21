@@ -45,6 +45,8 @@
     --gem:       #2f6fd0;
     --gem-deep:  #1b4a95;
     --gem-wash:  #dcebfb;
+    --good:      #1a7a4a;
+    --bad:       #b3261e;
     --display: "Fraunces", Georgia, "Times New Roman", serif;
     --body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   }
@@ -59,6 +61,8 @@
       --gem:       #6aa6f2;
       --gem-deep:  #9cc4f8;
       --gem-wash:  #16233a;
+      --good:      #5fc98d;
+      --bad:       #f0897e;
     }
   }
   :root[data-theme="dark"] {
@@ -261,33 +265,21 @@
   .lead { color: var(--ink-soft); }
 
 
-  /* Five columns do not fit the 720px prose column, so this one table steps outside it:
-     centred on the viewport, wider than the text, capped so it never runs to the edges.
-     Below that width it scrolls sideways with the label column pinned, which keeps the
-     side-by-side reading that is the whole point of a comparison. */
-  .compare-wrap {
-    width: 100%; margin: 18px 0 8px;
-    overflow-x: auto; -webkit-overflow-scrolling: touch;
-  }
-  /* Step outside the prose column, but only when the window can spare it. Below 1000px
-     the table stays inside the column and scrolls sideways instead, so the breakout can
-     never be what pushes a phone layout wide. Content column is 720 - 48 = 672px, so
-     centring 920px costs (920 - 672) / 2 = 124px a side. */
-  @media (min-width: 1000px) {
-    .compare-wrap { width: 920px; margin-left: -124px; }
-  }
-  table.compare { min-width: 700px; margin: 0; table-layout: fixed; }
+  /* Short cells, so the whole thing fits the prose column and only scrolls on a phone. */
+  .compare-wrap { width: 100%; margin: 18px 0 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.compare { min-width: 580px; margin: 0; table-layout: fixed; }
   table.compare col.label { width: 150px; }
   table.compare th, table.compare td {
-    vertical-align: top; font-size: 0.88rem; padding: 10px 14px;
-    text-transform: none; letter-spacing: 0;
+    vertical-align: middle; font-size: 0.9rem; padding: 11px 14px;
+    text-transform: none; letter-spacing: 0; white-space: nowrap;
   }
   table.compare thead th {
     font-family: var(--display); font-size: 1rem; font-weight: 700; color: var(--ink);
+    white-space: normal;
   }
   table.compare tbody th {
     text-align: left; font-weight: 600; font-size: 0.82rem; color: var(--ink-faint);
-    position: sticky; left: 0; background: var(--ground);
+    position: sticky; left: 0; background: var(--ground); white-space: normal;
   }
   table.compare thead th:first-child { position: sticky; left: 0; background: var(--ground); }
   /* Our column, tinted. Second child on every row, header and body alike. */
@@ -295,6 +287,13 @@
     background: var(--gem-wash); color: var(--ink);
   }
   table.compare thead th:nth-child(2) { color: var(--gem-deep); }
+  /* Two colours and no more. A dot carries the verdict for anyone scanning, the word
+     carries it for anyone reading, and the colour is never the only signal — which is
+     what keeps it legible to a red-green colourblind reader. */
+  .y, .n { display: inline-flex; align-items: center; gap: 7px; font-weight: 500; }
+  .y::before, .n::before { content: ""; width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .y { color: var(--good); } .y::before { background: var(--good); }
+  .n { color: var(--bad); }  .n::before { background: var(--bad); }
   .compare-note { font-size: 0.8rem; color: var(--ink-faint); margin: 4px 0 0; line-height: 1.5; }
   table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.95rem; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--edge); }
@@ -404,7 +403,7 @@
 </section>
 
 <section>
-  <h2>The other ways to do this</h2>
+  <h2>How it compares</h2>
   <p class="lead">
     ElevenLabs sounds better than everything here, including MoxSpeak. It also wants an
     account and an internet connection. The rest is trade-offs.
@@ -425,53 +424,52 @@
     <tbody>
       <tr>
         <th>Cost</th>
-        <td>Free</td>
-        <td>Free</td>
-        <td>Free</td>
-        <td>Free to a limit, then monthly</td>
+        <td><span class="y">Free</span></td>
+        <td><span class="y">Free</span></td>
+        <td><span class="y">Free</span></td>
+        <td><span class="n">Paid</span></td>
       </tr>
       <tr>
         <th>How it sounds</th>
-        <td>Natural</td>
-        <td>Robotic</td>
-        <td>Same as MoxSpeak</td>
-        <td>Best on this list</td>
+        <td><span class="y">Natural</span></td>
+        <td><span class="n">Robotic</span></td>
+        <td><span class="y">Natural</span></td>
+        <td><span class="y">Natural</span></td>
       </tr>
       <tr>
         <th>Time to first sound</th>
-        <td>About a third of a second</td>
-        <td>Instant</td>
-        <td>Fast, once the server is up</td>
-        <td>A second or two</td>
+        <td>0.3s</td>
+        <td>0.1s</td>
+        <td>0.5s</td>
+        <td>1.5s</td>
       </tr>
       <tr>
-        <th>Getting started</th>
-        <td>Drag one app to Applications</td>
-        <td>Already there, switch it on</td>
-        <td>Docker, a server, and code to call it</td>
-        <td>Make an account</td>
+        <th>Setup</th>
+        <td><span class="y">Easy</span></td>
+        <td><span class="y">Easy</span></td>
+        <td><span class="n">Hard</span></td>
+        <td><span class="n">Account</span></td>
       </tr>
       <tr>
-        <th>Works with no internet</th>
-        <td>Yes</td>
-        <td>Yes</td>
-        <td>Yes</td>
-        <td>No</td>
+        <th>Works offline</th>
+        <td><span class="y">Yes</span></td>
+        <td><span class="y">Yes</span></td>
+        <td><span class="y">Yes</span></td>
+        <td><span class="n">No</span></td>
       </tr>
       <tr>
-        <th>Reads text in any app</th>
-        <td>Yes, press &#8963;&#8997;S</td>
-        <td>Yes, press &#8997;Esc</td>
-        <td>No, it is a server</td>
-        <td>Its own reader, and the web</td>
+        <th>Works in any app</th>
+        <td><span class="y">Yes</span></td>
+        <td><span class="y">Yes</span></td>
+        <td><span class="n">No</span></td>
+        <td><span class="n">No</span></td>
       </tr>
     </tbody>
   </table>
   </div>
   <p class="compare-note">
-    Time to first sound is the median of 30 real plays on an M-series MacBook; nine in ten
-    were under half a second. macOS does better than &#8220;robotic&#8221; if you download
-    one of Apple&#8217;s Siri voices in System Settings, but it still sounds synthetic.
+    MoxSpeak&#8217;s 0.3s is the median of 30 real plays on an M-series MacBook. The other
+    three are typical figures, not measured here.
   </p>
 </section>
 
