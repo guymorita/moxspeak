@@ -17,6 +17,11 @@ public final class NativeKokoroEngine {
         case voiceMalformed(name: String)
         case textTooLong(characters: Int)
         case engine(String)
+        /// The weight file is present but could not be parsed. `underlying` is MLX's own
+        /// message; it names an absolute path, so it is deliberately kept out of
+        /// `description` — that string reaches both the user's screen and Sentry, and
+        /// neither may carry a filesystem path.
+        case weightsUnreadable(underlying: String)
 
         public var description: String {
             switch self {
@@ -30,6 +35,9 @@ public final class NativeKokoroEngine {
                 "Text of \(characters) characters exceeds the model's context window; segment it first."
             case .engine(let message):
                 message
+            case .weightsUnreadable:
+                "MoxSpeak's voice model is damaged or was copied incompletely. "
+                + "Reinstalling MoxSpeak will replace it."
             }
         }
     }
@@ -55,7 +63,16 @@ public final class NativeKokoroEngine {
         try NativeRuntime.requireMetalLibrary()
         try assets.validate()
         self.assets = assets
-        self.tts = KokoroTTS(modelPath: assets.weightsURL, g2p: .misaki)
+        // `assets.validate()` above proves the file is *there*; it cannot prove it parses.
+        // The weights are the largest thing in the bundle, so a copy interrupted partway
+        // out of the DMG leaves a truncated file that passes validation. Upstream trapped
+        // on it (SIGTRAP, no message, nothing actionable in the crash report); translate
+        // it into something a person can act on instead.
+        do {
+            self.tts = try KokoroTTS(modelPath: assets.weightsURL, g2p: .misaki)
+        } catch {
+            throw SynthesisError.weightsUnreadable(underlying: "\(error)")
+        }
     }
 
     /// Runs one throwaway synthesis so the first real request does not pay for lazy

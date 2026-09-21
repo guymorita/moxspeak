@@ -150,18 +150,37 @@ struct KokoroConfig: Decodable {
   /// parses it as JSON, and caches the result for future use.
   ///
   /// - Returns: Parsed KokoroConfig instance
-  /// - Note: Uses forced unwrapping (try!) as configuration loading is critical
-  ///         and should fail fast if the file is missing or malformed
-  nonisolated static func loadConfig() -> KokoroConfig {
+  /// - Throws: `ConfigError` when the bundled file is missing or malformed. Upstream
+  ///           trapped here; see `WeightLoader.loadWeights` for why a broken bundle is a
+  ///           reportable condition rather than a crash.
+  enum ConfigError: Error, CustomStringConvertible {
+    case resourceMissing
+    case malformed(underlying: any Error)
+
+    var description: String {
+      switch self {
+      case .resourceMissing:
+        return "config.json is missing from the app bundle."
+      case .malformed(let underlying):
+        return "config.json could not be parsed: \(underlying)"
+      }
+    }
+  }
+
+  nonisolated static func loadConfig() throws -> KokoroConfig {
     // Locate config.json in the module bundle
-    let fileURL = MoxSpeakResourceLocator.url(forResource: "config", withExtension: "json")!
-    
-    // Read file contents
-    let configJSON = try! String(contentsOf: fileURL, encoding: .utf8)
-    
-    // Parse JSON and cache the result
-    KokoroConfig.config = try! JSONDecoder().decode(KokoroConfig.self, from: configJSON.data(using: .utf8)!)
-    
-    return KokoroConfig.config!
+    guard let fileURL = MoxSpeakResourceLocator.url(forResource: "config", withExtension: "json") else {
+      throw ConfigError.resourceMissing
+    }
+
+    do {
+      // Read file contents, parse JSON and cache the result
+      let configJSON = try Data(contentsOf: fileURL)
+      let parsed = try JSONDecoder().decode(KokoroConfig.self, from: configJSON)
+      KokoroConfig.config = parsed
+      return parsed
+    } catch {
+      throw ConfigError.malformed(underlying: error)
+    }
   }
 }

@@ -125,6 +125,17 @@ would pull in a *second*, unvendored copy of the G2P we just took control of.
    keeps `phonemizeText` private, so there is no way to read the phoneme string without
    running synthesis. G2P is the part of this pipeline most likely to be wrong and a wrong
    pronunciation is invisible in every acoustic metric, so it needs to be inspectable.
+4. **Model loading throws instead of trapping.** `WeightLoader.loadWeights`,
+   `KokoroConfig.loadConfig` and `KokoroTTS.init` were `try!`/`!` throughout, on upstream's
+   stated reasoning that loading is critical and should fail fast. Fast, but silent. The
+   weight file is the largest thing in the bundle, so a copy interrupted partway out of the
+   DMG leaves it present-but-truncated — which passes `NativeModelAssets.validate()`, since
+   that only checks existence — and the process then died with `EXC_BREAKPOINT`/SIGTRAP and
+   no message, throwing away the one useful fact in the failure: MLX's own report of which
+   file was bad and why. All three now throw; `NativeKokoroEngine.init` (already `throws`)
+   translates the result into `SynthesisError.weightsUnreadable`, whose description tells
+   the user to reinstall and deliberately omits MLX's absolute path, because that string
+   reaches both the screen and Sentry. Covered by `CorruptWeightsTests`.
 
 `TextProcessing/eSpeakNGG2PProcessor.swift` is retained verbatim; it is entirely inside
 `#if canImport(eSpeakNGLib)` and compiles to nothing, since we do not ship eSpeak.
